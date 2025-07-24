@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export async function POST(req: NextRequest) {
   let requestText = '';
@@ -31,22 +32,49 @@ export async function POST(req: NextRequest) {
       );
     }
     
-    // For now, since Gemini TTS API is in preview and TypeScript definitions 
-    // aren't available yet, we'll return a fallback response
-    // This allows the app to work with graceful degradation
+    // Initialize Gemini with TTS model
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.5-flash-preview-tts",
+    });
     
-    console.log('Gemini TTS requested for:', text.substring(0, 50) + '...');
+    console.log('Using Gemini 2.5 Flash Preview TTS for:', text.substring(0, 50) + '...');
     console.log('Voice style:', voice, 'Speed:', speed);
     
-    // Simulate processing time for a more realistic experience
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // Generate TTS with Gemini
+    const voicePrompt = voice === 'default' ? 'warm and friendly' : voice;
+    const speedPrompt = speed === 'fast' ? 'at a slightly faster pace' : 
+                       speed === 'slow' ? 'at a slower, more deliberate pace' : 
+                       'at a normal speaking pace';
     
-    // Return fallback response indicating TTS should use Web Speech API
-    // Once Gemini TTS API is fully available, this can be updated
+    const prompt = `Generate natural speech audio with a ${voicePrompt} voice ${speedPrompt} for the following text: "${text}"`;
+    const result = await model.generateContent(prompt);
+    
+    // Check if we got audio data back
+    if (result.response && result.response.candidates && result.response.candidates[0]) {
+      const candidate = result.response.candidates[0];
+      
+      // If audio data is available, return it
+      if (candidate.content && candidate.content.parts) {
+        for (const part of candidate.content.parts) {
+          if (part.inlineData && part.inlineData.mimeType?.startsWith('audio/')) {
+            const audioBuffer = Buffer.from(part.inlineData.data, 'base64');
+            return new Response(audioBuffer, {
+              headers: { 
+                'Content-Type': part.inlineData.mimeType,
+                'Content-Length': audioBuffer.length.toString()
+              }
+            });
+          }
+        }
+      }
+    }
+    
+    // If no audio data, fallback to Web Speech API
     return NextResponse.json({ 
       text: text,
       fallback: true,
-      message: 'Gemini TTS is in preview - using enhanced Web Speech API',
+      message: 'Gemini TTS response received but no audio data - using Web Speech API',
       voiceStyle: voice,
       speed: speed
     });
@@ -94,32 +122,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-
-/* 
- * Future implementation when Gemini TTS API is fully available:
- * 
- * import { GoogleGenerativeAI } from '@google/generative-ai';
- * 
- * try {
- *   // Initialize Gemini for TTS
- *   const genAI = new GoogleGenerativeAI(apiKey);
- *   const model = genAI.getGenerativeModel({ 
- *     model: "gemini-2.5-flash",
- *     generationConfig: {
- *       responseFormat: "audio/wav" // When available
- *     }
- *   });
- *   
- *   const prompt = `Generate natural speech with ${voice} voice style at ${speed} speed: "${text}"`;
- *   const result = await model.generateContent(prompt);
- *   
- *   // Handle audio response when API supports it
- *   if (result.response.audio) {
- *     return new Response(result.response.audio, {
- *       headers: { 'Content-Type': 'audio/wav' }
- *     });
- *   }
- * } catch (audioError) {
- *   // Fallback to Web Speech API
- * }
- */ 

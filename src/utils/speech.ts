@@ -220,13 +220,20 @@ export async function isGeminiTTSAvailable(): Promise<boolean> {
     });
     
     if (response.ok) {
+      const contentType = response.headers.get('content-type');
+      
+      // If we get audio content, TTS is available
+      if (contentType?.includes('audio/')) {
+        return true;
+      }
+      
+      // If we get JSON, check fallback flag
       const data = await response.json();
       return !data.fallback;
     }
     
     return false;
   } catch {
-    // Removed unused error parameter
     return false;
   }
 }

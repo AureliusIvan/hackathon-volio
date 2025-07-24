@@ -39,7 +39,7 @@ export async function POST(req: NextRequest) {
     const model = genAI.getGenerativeModel({ 
       model: modelName,
       generationConfig: {
-        temperature: 0.7
+        temperature: 0.7,
       },
     });
 
