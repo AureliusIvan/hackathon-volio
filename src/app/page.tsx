@@ -5,12 +5,6 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import { speak, isGeminiTTSAvailable, createSpeechRecognition, SpeechRecognition, playRingSound } from '../utils/speech';
 import { generateImageHash, areImagesSimilar } from '../utils/imageHash';
 
-interface ApiErrorResponse {
-  error: string;
-  errorType?: string;
-  retryAfter?: number;
-}
-
 interface Description {
   text: string;
   timestamp: Date;
@@ -166,8 +160,7 @@ export default function CameraView() {
                     const data = JSON.parse(line.slice(6));
                     
                     if (data.type === 'start') {
-                      // Analysis started
-                      await speakWithSettings('Analyzing...');
+                      // Analysis started - no announcement needed
                     } else if (data.type === 'chunk') {
                       fullText = data.fullText;
                       
@@ -438,7 +431,7 @@ export default function CameraView() {
       await speakWithSettings('Narration Mode is on now. Tap for details, hold to talk with AI.');
       setFocusTimer(0);
     } else {
-      await speakWithSettings('Guidance Mode is on now. Navigation assistance every 5 seconds.');
+      await speakWithSettings('Guidance Mode is on now. Navigation assistance every 4 seconds.');
     }
   }, [currentMode, speakWithSettings]);
 
@@ -474,7 +467,7 @@ export default function CameraView() {
           if (currentMode === 'guidance') {
             scheduleNextGuidanceUpdate();
           }
-        }, 5000); // Wait 5 seconds before next update
+                  }, 4000); // Wait 4 seconds before next update
       };
 
       // Start the first update
@@ -828,7 +821,7 @@ export default function CameraView() {
             <div className={`text-center p-2 rounded-lg ${currentMode === 'guidance' ? 'bg-green-600' : 'bg-green-400'
               } bg-opacity-80 text-white`}>
               <h3 className="text-sm font-semibold">🧭 GUIDANCE MODE</h3>
-              <p className="text-xs">Navigation assistance every 5 seconds</p>
+              <p className="text-xs">Navigation assistance every 4 seconds</p>
             </div>
           </div>
         </div>
