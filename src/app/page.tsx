@@ -415,45 +415,11 @@ export default function CameraView() {
     }, 500);
   }, [isLoading, isCameraReady, captureImage, optimizedAnalysis, speakWithSettings]);
 
-  // Optimized guidance mode update with similarity detection
-  const handleGuidanceUpdate = useCallback(async () => {
-    if (isLoading || !isCameraReady) return;
 
-    try {
-      setIsLoading(true);
-
-      const imageDataUrl = await captureImage();
-      if (!imageDataUrl) return;
-
-      // Use optimized analysis with similarity detection and caching
-      const newDescription = await optimizedAnalysis(imageDataUrl, 'guidance');
-
-      // Only update if we got a new description (not skipped due to similarity)
-      if (newDescription) {
-        setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
-      }
-
-    } catch (err) {
-      console.error('Guidance update error:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isLoading, isCameraReady, captureImage, optimizedAnalysis]);
-
-  // Guidance mode periodic updates
-  const startGuidanceMode = useCallback(() => {
-    guidanceTimerRef.current = setInterval(async () => {
-      if (currentMode === 'guidance' && !isLoading) {
-        await handleGuidanceUpdate();
-      }
-    }, 5000); // Every 5 seconds
-  }, [currentMode, isLoading, handleGuidanceUpdate]);
 
   // Mode switching function
   const switchMode = useCallback(async (newMode: AppMode) => {
     if (newMode === currentMode) return;
-
-    setCurrentMode(newMode);
 
     // Clear any existing timers
     if (focusTimerRef.current) {
@@ -465,15 +431,63 @@ export default function CameraView() {
       guidanceTimerRef.current = null;
     }
 
+    setCurrentMode(newMode);
+
     // Announce mode switch
     if (newMode === 'narration') {
       await speakWithSettings('Narration Mode is on now. Tap for details, hold to talk with AI.');
       setFocusTimer(0);
     } else {
       await speakWithSettings('Guidance Mode is on now. Navigation assistance every 5 seconds.');
-      startGuidanceMode();
     }
-  }, [currentMode, speakWithSettings, startGuidanceMode]);
+  }, [currentMode, speakWithSettings]);
+
+  // Guidance mode management with useEffect
+  useEffect(() => {
+    if (currentMode === 'guidance') {
+      const scheduleNextGuidanceUpdate = () => {
+        guidanceTimerRef.current = setTimeout(async () => {
+          // Check if still in guidance mode and ready
+          if (currentMode === 'guidance' && !isLoading && isCameraReady) {
+            try {
+              setIsLoading(true);
+
+              const imageDataUrl = await captureImage();
+              if (imageDataUrl) {
+                // Use optimized analysis with similarity detection and caching
+                const newDescription = await optimizedAnalysis(imageDataUrl, 'guidance');
+
+                // Only update if we got a new description (not skipped due to similarity)
+                if (newDescription) {
+                  setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
+                }
+              }
+
+            } catch (err) {
+              console.error('Guidance update error:', err);
+            } finally {
+              setIsLoading(false);
+            }
+          }
+
+          // Schedule next update only after current one completes
+          if (currentMode === 'guidance') {
+            scheduleNextGuidanceUpdate();
+          }
+        }, 5000); // Wait 5 seconds before next update
+      };
+
+      // Start the first update
+      scheduleNextGuidanceUpdate();
+
+      return () => {
+        if (guidanceTimerRef.current) {
+          clearTimeout(guidanceTimerRef.current);
+          guidanceTimerRef.current = null;
+        }
+      };
+    }
+  }, [currentMode]); // Only depend on currentMode
 
   // Auto-capture for narration mode
   const startFocusTimer = useCallback(() => {
