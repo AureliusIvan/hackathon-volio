@@ -25,7 +25,7 @@ export default function CameraView() {
   const [ttsSettings, setTtsSettings] = useState({
     useGeminiTTS: true,
     voice: 'default',
-    speed: 'normal'
+    speed: 'fast'
   });
   const [geminiTTSAvailable, setGeminiTTSAvailable] = useState<boolean>(false);
 
@@ -467,7 +467,7 @@ export default function CameraView() {
           if (currentMode === 'guidance') {
             scheduleNextGuidanceUpdate();
           }
-                  }, 4000); // Wait 4 seconds before next update
+                  }, 3000); // Wait 3 seconds before next update
       };
 
       // Start the first update

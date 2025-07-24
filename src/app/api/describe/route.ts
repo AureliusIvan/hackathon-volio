@@ -60,10 +60,14 @@ TASK: In max 2 short sentences, tell the user:
 • Doorways/passages (+direction)  
 • Urgent hazards (stairs, wet floor)
 
-Start with the most critical detail.
-Example: “Clear corridor. Low step in 2m, doorway left.”
+# IF danger
+Start with the action, then explanation.
+Example: "Go Left. There are large Pilar",
 
-      `;
+# IF NO danger
+Describe the image
+"There is a door, in 5 meters",
+`;
     }
 
     // Strip the data URL prefix if present

@@ -12,7 +12,7 @@ export async function speak(text: string, options: {
   speed?: string; 
   forceWebTTS?: boolean;
 } = {}): Promise<void> {
-  const { voice = 'default', speed = 'normal', forceWebTTS = false } = options;
+  const { voice = 'default', speed = 'fast', forceWebTTS = false } = options;
   
   // Cancel any currently speaking utterance
   if (window.speechSynthesis) {
@@ -107,7 +107,7 @@ export async function speak(text: string, options: {
 }
 
 // Original Web Speech API implementation as fallback
-function speakWithWebTTS(text: string, speed: string = 'normal'): Promise<void> {
+function speakWithWebTTS(text: string, speed: string = 'fast'): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!window.speechSynthesis) {
       console.error('Speech synthesis not supported');
