@@ -5,7 +5,7 @@ import { searchImageTopics, isExaAvailable } from '../../../utils/exa';
 export async function POST(req: NextRequest) {
   try {
     // Parse the request body
-    const { image, mode = 'narration' }: { image: string; mode?: 'narration' | 'guidance' } = await req.json();
+    const { image, mode = 'narration', singleTap = false }: { image: string; mode?: 'narration' | 'guidance'; singleTap?: boolean } = await req.json();
 
     // Input validation
     if (!image || typeof image !== 'string') {
@@ -31,17 +31,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Initialize Gemini
+    // Initialize Gemini with mode-specific model configuration
     const genAI = new GoogleGenerativeAI(apiKey);
+    
+    // Use different models based on mode
+    const modelName = mode === 'narration' ? 'gemini-2.5-flash' : 'gemini-2.0-flash';
     const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.0-flash",
+      model: modelName,
     });
 
     // Prepare mode-specific prompts
     let prompt: string;
 
     if (mode === 'narration') {
-      prompt = `
+      if (singleTap) {
+        prompt = `
+You are NaraNetra, an assistant for the visually impaired. You are in SINGLE TAP OBJECT DETECTION MODE.
+
+Identify the main object or item in this image and respond in this exact format:
+
+OBJECT: [Name of the main object/item you see]
+DESCRIPTION: [Brief 1-2 sentence description of the object]
+
+Focus on identifying the most prominent, central object in the image. Be specific with the object name - include brand names, specific types, or proper nouns if visible.
+
+Examples:
+OBJECT: iPhone 15 Pro
+DESCRIPTION: A modern smartphone with a titanium frame and multiple camera lenses on the back.
+
+OBJECT: Coca-Cola bottle
+DESCRIPTION: A classic glass bottle of Coca-Cola with the distinctive red and white logo.`;
+      } else {
+        prompt = `
 You are NaraNetra, an assistant for the visually impaired. You are in NARRATION MODE.
 
 Analyze this image and provide a comprehensive, detailed description that includes:
@@ -54,6 +75,7 @@ Analyze this image and provide a comprehensive, detailed description that includ
 Be educational and informative. If you recognize specific objects, brands, landmarks, or cultural items, share relevant knowledge about them. Make it engaging and informative for someone who cannot see the image.
 
 Format your response as a flowing, conversational explanation that would help someone understand both what they're looking at and learn something interesting about it.`;
+      }
     } else {
       prompt = `
 # ROLE: NaraNetra Guidance Mode  
@@ -98,6 +120,7 @@ safe, {explanation}
           const initialData = {
             type: 'start',
             mode: mode,
+            singleTap: singleTap,
             timestamp: new Date().toISOString()
           };
           controller.enqueue(`data: ${JSON.stringify(initialData)}\n\n`);
@@ -116,7 +139,8 @@ safe, {explanation}
                 type: 'chunk',
                 text: chunkText,
                 fullText: fullText,
-                mode: mode
+                mode: mode,
+                singleTap: singleTap
               };
               controller.enqueue(`data: ${JSON.stringify(chunkData)}\n\n`);
             }
@@ -128,12 +152,22 @@ safe, {explanation}
               // Send web search status
               const searchStatusData = {
                 type: 'web_search_start',
-                message: 'Searching for additional information...'
+                message: singleTap ? 'Searching for object information...' : 'Searching for additional information...'
               };
               controller.enqueue(`data: ${JSON.stringify(searchStatusData)}\n\n`);
 
-              // Perform web search based on image description
-              const searchResults = await searchImageTopics(fullText, mode);
+              // Prepare search query based on mode
+              let searchQuery = fullText;
+              if (singleTap) {
+                // Extract object name from structured response
+                const objectMatch = fullText.match(/OBJECT:\s*([^\n\r]+)/i);
+                if (objectMatch) {
+                  searchQuery = objectMatch[1].trim();
+                }
+              }
+
+              // Perform web search based on image description or object
+              const searchResults = await searchImageTopics(searchQuery, mode);
               
               if (searchResults && searchResults.results.length > 0) {
                 // Send web search results
@@ -155,6 +189,19 @@ safe, {explanation}
                 if (webInfo) {
                   const enhancedText = `${fullText}\n\nAdditional Information: ${webInfo}`;
                   
+                  // Extract object info for single tap mode
+                  let objectInfo = null;
+                  if (singleTap) {
+                    const objectMatch = fullText.match(/OBJECT:\s*([^\n\r]+)/i);
+                    const descMatch = fullText.match(/DESCRIPTION:\s*([^\n\r]+)/i);
+                    if (objectMatch) {
+                      objectInfo = {
+                        name: objectMatch[1].trim(),
+                        description: descMatch ? descMatch[1].trim() : null
+                      };
+                    }
+                  }
+                  
                   // Send enhanced complete data
                   const enhancedCompleteData = {
                     type: 'complete',
@@ -162,27 +209,60 @@ safe, {explanation}
                     originalText: fullText,
                     webInfo: webInfo,
                     mode: mode,
+                    singleTap: singleTap,
+                    objectInfo: objectInfo,
+                    searchQuery: searchQuery,
                     timestamp: new Date().toISOString(),
                     hasWebSearch: true
                   };
                   controller.enqueue(`data: ${JSON.stringify(enhancedCompleteData)}\n\n`);
                 } else {
+                  // Extract object info for single tap mode
+                  let objectInfo = null;
+                  if (singleTap) {
+                    const objectMatch = fullText.match(/OBJECT:\s*([^\n\r]+)/i);
+                    const descMatch = fullText.match(/DESCRIPTION:\s*([^\n\r]+)/i);
+                    if (objectMatch) {
+                      objectInfo = {
+                        name: objectMatch[1].trim(),
+                        description: descMatch ? descMatch[1].trim() : null
+                      };
+                    }
+                  }
+                  
                   // Send regular completion if no useful web info
                   const completeData = {
                     type: 'complete',
                     fullText: fullText,
                     mode: mode,
+                    singleTap: singleTap,
+                    objectInfo: objectInfo,
                     timestamp: new Date().toISOString(),
                     hasWebSearch: false
                   };
                   controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
                 }
               } else {
+                // Extract object info for single tap mode
+                let objectInfo = null;
+                if (singleTap) {
+                  const objectMatch = fullText.match(/OBJECT:\s*([^\n\r]+)/i);
+                  const descMatch = fullText.match(/DESCRIPTION:\s*([^\n\r]+)/i);
+                  if (objectMatch) {
+                    objectInfo = {
+                      name: objectMatch[1].trim(),
+                      description: descMatch ? descMatch[1].trim() : null
+                    };
+                  }
+                }
+                
                 // Send regular completion if no search results
                 const completeData = {
                   type: 'complete',
                   fullText: fullText,
                   mode: mode,
+                  singleTap: singleTap,
+                  objectInfo: objectInfo,
                   timestamp: new Date().toISOString(),
                   hasWebSearch: false
                 };
@@ -190,22 +270,53 @@ safe, {explanation}
               }
             } catch (searchError) {
               console.error('Web search error:', searchError);
+              
+              // Extract object info for single tap mode
+              let objectInfo = null;
+              if (singleTap) {
+                const objectMatch = fullText.match(/OBJECT:\s*([^\n\r]+)/i);
+                const descMatch = fullText.match(/DESCRIPTION:\s*([^\n\r]+)/i);
+                if (objectMatch) {
+                  objectInfo = {
+                    name: objectMatch[1].trim(),
+                    description: descMatch ? descMatch[1].trim() : null
+                  };
+                }
+              }
+              
               // Send regular completion on search error
               const completeData = {
                 type: 'complete',
                 fullText: fullText,
                 mode: mode,
+                singleTap: singleTap,
+                objectInfo: objectInfo,
                 timestamp: new Date().toISOString(),
                 hasWebSearch: false
               };
               controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
             }
           } else {
+            // Extract object info for single tap mode
+            let objectInfo = null;
+            if (singleTap) {
+              const objectMatch = fullText.match(/OBJECT:\s*([^\n\r]+)/i);
+              const descMatch = fullText.match(/DESCRIPTION:\s*([^\n\r]+)/i);
+              if (objectMatch) {
+                objectInfo = {
+                  name: objectMatch[1].trim(),
+                  description: descMatch ? descMatch[1].trim() : null
+                };
+              }
+            }
+            
             // Send regular completion for guidance mode or when Exa not available
             const completeData = {
               type: 'complete',
               fullText: fullText,
               mode: mode,
+              singleTap: singleTap,
+              objectInfo: objectInfo,
               timestamp: new Date().toISOString(),
               hasWebSearch: false
             };

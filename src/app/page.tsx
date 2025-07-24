@@ -53,6 +53,7 @@ export default function CameraView() {
   const guidanceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
   const holdStartTimeRef = useRef<number>(0);
+  const tapStartTimeRef = useRef<number>(0);
 
   // Memoized speech function to avoid dependency warnings
   const speakWithSettings = useCallback(async (text: string, options: { forceWebTTS?: boolean } = {}) => {
@@ -114,7 +115,8 @@ export default function CameraView() {
   // Helper function for streaming analysis
   const streamAnalysis = useCallback(async (
     imageDataUrl: string, 
-    mode: 'narration' | 'guidance'
+    mode: 'narration' | 'guidance',
+    singleTap: boolean = false
   ): Promise<Description> => {
     return new Promise((resolve, reject) => {
       const eventSource = new EventSource('/api/describe');
@@ -131,7 +133,8 @@ export default function CameraView() {
         },
         body: JSON.stringify({
           image: imageDataUrl,
-          mode: mode
+          mode: mode,
+          singleTap: singleTap
         }),
       }).then(response => {
         if (!response.ok) {
@@ -166,8 +169,8 @@ export default function CameraView() {
                     } else if (data.type === 'chunk') {
                       fullText = data.fullText;
                       
-                      // Start speaking after we have a meaningful chunk (≥30 chars)
-                      if (!hasStartedSpeaking && fullText.length >= 30) {
+                      // Start speaking after we have a meaningful chunk (≥30 chars) - but not for single tap
+                      if (!singleTap && !hasStartedSpeaking && fullText.length >= 30) {
                         hasStartedSpeaking = true;
                         // Start speaking the first chunk
                         speakWithSettings(fullText);
@@ -198,8 +201,8 @@ export default function CameraView() {
                         mode: mode
                       };
                       
-                      // If we haven't started speaking yet, speak the full text
-                      if (!hasStartedSpeaking) {
+                      // If we haven't started speaking yet, speak the full text (but not for single tap)
+                      if (!singleTap && !hasStartedSpeaking) {
                         await speakWithSettings(data.fullText);
                       }
                       
@@ -337,6 +340,41 @@ export default function CameraView() {
       });
     });
   }, [speakWithSettings]);
+
+  // Single tap object detection (silent)
+  const handleSingleTapDetection = useCallback(async (): Promise<void> => {
+    if (isLoading || !isCameraReady) return;
+
+    try {
+      setIsLoading(true);
+      setError(null);
+      setIsWebSearching(false);
+      setHasWebResults(false);
+
+      const imageDataUrl = await captureImage();
+      if (!imageDataUrl) return;
+
+      // Use streaming analysis with single tap mode (no auto-voice)
+      const newDescription = await streamAnalysis(imageDataUrl, 'narration', true);
+      
+      if (newDescription) {
+        setCurrentDescription(newDescription);
+        setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
+        
+        // Optional: Brief audio feedback for single tap completion
+        playRingSound('end');
+      }
+
+    } catch (err) {
+      console.error('Single tap detection error:', err);
+      const errorMessage = 'Object detection failed. Please try again.';
+      setError(errorMessage);
+      // Brief error sound instead of voice
+      playRingSound('start');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isLoading, isCameraReady, captureImage, streamAnalysis]);
 
   // Optimized analysis with similarity detection and caching
   const optimizedAnalysis = useCallback(async (imageDataUrl: string, mode: 'narration' | 'guidance'): Promise<Description | null> => {
@@ -677,7 +715,7 @@ export default function CameraView() {
           video.srcObject = stream;
           video.onloadedmetadata = async () => {
             setIsCameraReady(true);
-            await speakWithSettings('Camera ready. Narration Mode is on now. Tap top half for detailed descriptions, bottom half for navigation guidance. Hold top area to talk with AI.');
+            await speakWithSettings('Camera ready. Narration Mode is on now. Short tap top for silent object detection, hold top to talk with AI. Tap bottom for navigation guidance.');
           };
         }
       } catch (err) {
@@ -737,6 +775,8 @@ export default function CameraView() {
 
   // Handle screen area mouse/touch events
   const handleMouseDown = async (event: React.MouseEvent) => {
+    tapStartTimeRef.current = Date.now();
+    
     const rect = event.currentTarget.getBoundingClientRect();
     const clickY = event.clientY - rect.top;
     const screenHeight = rect.height;
@@ -752,14 +792,28 @@ export default function CameraView() {
     }
   };
 
-  const handleMouseUp = async () => {
+  const handleMouseUp = async (event: React.MouseEvent) => {
+    const tapDuration = Date.now() - tapStartTimeRef.current;
+    
     if (isHoldingToTalk && currentMode === 'narration') {
       await endHoldToTalk();
+    } else if (currentMode === 'narration' && tapDuration < 300) {
+      // Short tap detected - trigger single tap object detection
+      const rect = event.currentTarget.getBoundingClientRect();
+      const clickY = event.clientY - rect.top;
+      const screenHeight = rect.height;
+      const isTopHalf = clickY < screenHeight / 2;
+      
+      if (isTopHalf) {
+        await handleSingleTapDetection();
+      }
     }
   };
 
   // Handle touch events for mobile
   const handleTouchStart = async (event: React.TouchEvent) => {
+    tapStartTimeRef.current = Date.now();
+    
     const rect = event.currentTarget.getBoundingClientRect();
     const touch = event.touches[0];
     const touchY = touch.clientY - rect.top;
@@ -775,9 +829,22 @@ export default function CameraView() {
     }
   };
 
-  const handleTouchEnd = async () => {
+  const handleTouchEnd = async (event: React.TouchEvent) => {
+    const tapDuration = Date.now() - tapStartTimeRef.current;
+    
     if (isHoldingToTalk && currentMode === 'narration') {
       await endHoldToTalk();
+    } else if (currentMode === 'narration' && tapDuration < 300) {
+      // Short tap detected - trigger single tap object detection
+      const rect = event.currentTarget.getBoundingClientRect();
+      const touch = event.changedTouches[0];
+      const touchY = touch.clientY - rect.top;
+      const screenHeight = rect.height;
+      const isTopHalf = touchY < screenHeight / 2;
+      
+      if (isTopHalf) {
+        await handleSingleTapDetection();
+      }
     }
   };
 
@@ -800,7 +867,7 @@ export default function CameraView() {
       onTouchEnd={handleTouchEnd}
       role="button"
       tabIndex={0}
-      aria-label="Tap top for narration mode, bottom for guidance mode. Hold top area to talk to AI."
+      aria-label="Short tap top for object detection, hold top to talk to AI. Tap bottom for guidance mode."
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
@@ -840,7 +907,7 @@ export default function CameraView() {
             <div className={`text-center p-2 rounded-lg ${currentMode === 'narration' ? 'bg-blue-600' : 'bg-blue-400'
               } bg-opacity-80 text-white`}>
               <h3 className="text-sm font-semibold">📖 NARRATION MODE</h3>
-              <p className="text-xs">Tap for details • Hold to talk to AI</p>
+              <p className="text-xs">Short tap for object detection • Hold to talk to AI</p>
               {currentMode === 'narration' && focusTimer > 0 && (
                 <p className="text-xs mt-1">Capturing in {focusTimer.toFixed(1)}s...</p>
               )}
