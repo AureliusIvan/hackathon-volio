@@ -44,3 +44,6 @@ next-env.d.ts
 ./public/sw.js
 ./public/swe-**
 ./public/workbox-**
+
+# tunnel
+tunnel-config.yml
