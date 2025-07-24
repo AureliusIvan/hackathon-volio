@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
     const voiceId = voiceMap[voice] || voiceMap['default'];
     
     // Generate TTS with ElevenLabs using streaming for faster response
+    // @ts-ignore
     const audioStream = await elevenlabs.textToSpeech.convertAsStream(voiceId, {
       text: text,
       model_id: "eleven_flash_v2",
