@@ -37,6 +37,10 @@ export default function CameraView() {
   const [isHoldingToTalk, setIsHoldingToTalk] = useState<boolean>(false);
   const [holdTimer, setHoldTimer] = useState<number>(0);
   
+  // Guidance mode health tracking
+  const [lastGuidanceUpdate, setLastGuidanceUpdate] = useState<Date | null>(null);
+  const [guidanceRetryCount, setGuidanceRetryCount] = useState<number>(0);
+  
   // Speech recognition states
   const [speechRecognition, setSpeechRecognition] = useState<SpeechRecognition | null>(null);
   const [isRecording, setIsRecording] = useState<boolean>(false);
@@ -51,6 +55,7 @@ export default function CameraView() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const focusTimerRef = useRef<NodeJS.Timeout | null>(null);
   const guidanceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const guidanceHealthCheckRef = useRef<NodeJS.Timeout | null>(null);
   const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
   const holdStartTimeRef = useRef<number>(0);
   const tapStartTimeRef = useRef<number>(0);
@@ -382,10 +387,20 @@ export default function CameraView() {
       // Generate image hash for similarity detection
       const currentHash = await generateImageHash(imageDataUrl);
       
-      // Check if image is similar to last analyzed image
-      if (lastImageHash && areImagesSimilar(currentHash, lastImageHash)) {
-        console.log('Similar image detected, skipping analysis');
-        return null;
+      // Check if image is similar to last analyzed image (less strict for guidance mode)
+      const similarityThreshold = mode === 'guidance' ? 4 : 6; // More sensitive for guidance (lower = more similar required)
+      if (lastImageHash && areImagesSimilar(currentHash, lastImageHash, similarityThreshold)) {
+        // For guidance mode, allow updates every 15 seconds even if similar
+        if (mode === 'guidance' && lastGuidanceUpdate && 
+            (Date.now() - lastGuidanceUpdate.getTime()) < 15000) {
+          console.log('Similar guidance image detected, skipping analysis');
+          return null;
+        }
+        // For narration mode, skip similar images
+        if (mode === 'narration') {
+          console.log('Similar narration image detected, skipping analysis');
+          return null;
+        }
       }
       
       // Check cache for exact match
@@ -417,14 +432,27 @@ export default function CameraView() {
       });
       
       setLastImageHash(currentHash);
+      
+      // Update guidance timestamp if in guidance mode
+      if (mode === 'guidance') {
+        setLastGuidanceUpdate(new Date());
+        setGuidanceRetryCount(0); // Reset retry count on successful update
+      }
+      
       return newDescription;
       
     } catch (error) {
       console.error('Optimized analysis error:', error);
+      
+      // For guidance mode, increment retry count
+      if (mode === 'guidance') {
+        setGuidanceRetryCount(prev => prev + 1);
+      }
+      
       // Fallback to regular analysis
       return await streamAnalysis(imageDataUrl, mode);
     }
-  }, [lastImageHash, imageCache, streamAnalysis]);
+  }, [lastImageHash, imageCache, streamAnalysis, lastGuidanceUpdate]);
 
   // Optimized narration mode capture with debouncing and similarity detection
   const handleNarrationCapture = useCallback(async () => {
@@ -483,6 +511,10 @@ export default function CameraView() {
       clearInterval(guidanceTimerRef.current);
       guidanceTimerRef.current = null;
     }
+    if (guidanceHealthCheckRef.current) {
+      clearInterval(guidanceHealthCheckRef.current);
+      guidanceHealthCheckRef.current = null;
+    }
 
     setCurrentMode(newMode);
 
@@ -498,49 +530,74 @@ export default function CameraView() {
   // Guidance mode management with useEffect
   useEffect(() => {
     if (currentMode === 'guidance') {
-      const scheduleNextGuidanceUpdate = () => {
-        guidanceTimerRef.current = setTimeout(async () => {
-          // Check if still in guidance mode and ready
-          if (currentMode === 'guidance' && !isLoading && isCameraReady) {
-            try {
-              setIsLoading(true);
-
-              const imageDataUrl = await captureImage();
-              if (imageDataUrl) {
-                // Use optimized analysis with similarity detection and caching
-                const newDescription = await optimizedAnalysis(imageDataUrl, 'guidance');
-
-                // Only update if we got a new description (not skipped due to similarity)
-                if (newDescription) {
-                  setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
-                }
-              }
-
-            } catch (err) {
-              console.error('Guidance update error:', err);
-            } finally {
-              setIsLoading(false);
+      // Initialize guidance tracking
+      setLastGuidanceUpdate(new Date());
+      setGuidanceRetryCount(0);
+      
+      // Use setInterval for more reliable updates
+      const performGuidanceUpdate = async () => {
+        // Skip if currently loading or camera not ready
+        if (isLoading || !isCameraReady) {
+          console.log('Guidance update skipped - loading or camera not ready');
+          return;
+        }
+        
+        try {
+          setIsLoading(true);
+          
+          const imageDataUrl = await captureImage();
+          if (imageDataUrl) {
+            // Use optimized analysis with similarity detection and caching
+            const newDescription = await optimizedAnalysis(imageDataUrl, 'guidance');
+            
+            // Only update if we got a new description (not skipped due to similarity)
+            if (newDescription) {
+              setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
+              setCurrentDescription(newDescription);
             }
           }
-
-          // Schedule next update only after current one completes
-          if (currentMode === 'guidance') {
-            scheduleNextGuidanceUpdate();
-          }
-                  }, 2500); // Wait 5 seconds before next update
+          
+        } catch (err) {
+          console.error('Guidance update error:', err);
+          setGuidanceRetryCount(prev => prev + 1);
+        } finally {
+          setIsLoading(false);
+        }
       };
-
-      // Start the first update
-      scheduleNextGuidanceUpdate();
-
+      
+      // Start immediate first update
+      performGuidanceUpdate();
+      
+      // Set up regular updates
+      guidanceTimerRef.current = setInterval(performGuidanceUpdate, 4000); // Every 4 seconds
+      
+      // Set up health check that runs every 10 seconds
+      guidanceHealthCheckRef.current = setInterval(() => {
+        if (currentMode === 'guidance') {
+          const now = Date.now();
+          const lastUpdate = lastGuidanceUpdate?.getTime() || 0;
+          const timeSinceLastUpdate = now - lastUpdate;
+          
+          // If no update in 12 seconds and retry count is reasonable, force an update
+          if (timeSinceLastUpdate > 12000 && guidanceRetryCount < 3) {
+            console.log('Guidance appears stuck, forcing update');
+            performGuidanceUpdate();
+          }
+        }
+      }, 10000); // Health check every 10 seconds
+      
       return () => {
         if (guidanceTimerRef.current) {
-          clearTimeout(guidanceTimerRef.current);
+          clearInterval(guidanceTimerRef.current);
           guidanceTimerRef.current = null;
+        }
+        if (guidanceHealthCheckRef.current) {
+          clearInterval(guidanceHealthCheckRef.current);
+          guidanceHealthCheckRef.current = null;
         }
       };
     }
-  }, [currentMode]); // Only depend on currentMode
+  }, [currentMode, isCameraReady]); // Depend on currentMode and camera readiness
 
   // Auto-capture for narration mode
   const startFocusTimer = useCallback(() => {
@@ -760,6 +817,7 @@ export default function CameraView() {
       // Clear timers
       if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
       if (guidanceTimerRef.current) clearInterval(guidanceTimerRef.current);
+      if (guidanceHealthCheckRef.current) clearInterval(guidanceHealthCheckRef.current);
       if (holdTimerRef.current) clearInterval(holdTimerRef.current);
     };
   }, [speakWithSettings]); // Only depend on speakWithSettings
@@ -935,6 +993,49 @@ export default function CameraView() {
               } bg-opacity-80 text-white`}>
               <h3 className="text-sm font-semibold">🧭 GUIDANCE MODE</h3>
               <p className="text-xs">Navigation assistance every 4 seconds</p>
+              {currentMode === 'guidance' && (
+                <div className="text-xs mt-1">
+                  {lastGuidanceUpdate && (
+                    <p className="text-green-200">
+                      Last update: {Math.round((Date.now() - lastGuidanceUpdate.getTime()) / 1000)}s ago
+                    </p>
+                  )}
+                  {guidanceRetryCount > 0 && (
+                    <p className="text-yellow-300">
+                      Retry attempts: {guidanceRetryCount}/3
+                    </p>
+                  )}
+                  {guidanceRetryCount >= 3 && (
+                    <div className="text-red-300">
+                      <p className="animate-pulse">⚠️ Guidance may be stuck</p>
+                      <button
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          try {
+                            setGuidanceRetryCount(0);
+                            setIsLoading(true);
+                            const imageDataUrl = await captureImage();
+                            if (imageDataUrl) {
+                              const newDescription = await optimizedAnalysis(imageDataUrl, 'guidance');
+                              if (newDescription) {
+                                setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
+                                setCurrentDescription(newDescription);
+                              }
+                            }
+                          } catch (err) {
+                            console.error('Manual guidance refresh error:', err);
+                          } finally {
+                            setIsLoading(false);
+                          }
+                        }}
+                        className="mt-1 px-2 py-1 bg-red-600 hover:bg-red-700 rounded text-xs"
+                      >
+                        🔄 Refresh Now
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>
