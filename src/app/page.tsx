@@ -335,7 +335,7 @@ export default function CameraView() {
       // Fallback to regular analysis
       return await streamAnalysis(imageDataUrl, mode);
     }
-  }, [lastImageHash, imageCache, streamAnalysis, lastGuidanceUpdate]);
+  }, [lastImageHash, imageCache, lastGuidanceUpdate]);
 
   // Mode switching function
   const switchMode = useCallback(async (newMode: AppMode) => {
@@ -389,8 +389,6 @@ export default function CameraView() {
             // Use optimized analysis with similarity detection and caching
             const newDescription = await optimizedAnalysis(imageDataUrl, 'guidance');
 
-            // TODO: I think we need to wait until the previous on is finished
-            
             // Only update if we got a new description (not skipped due to similarity)
             if (newDescription) {
               setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
