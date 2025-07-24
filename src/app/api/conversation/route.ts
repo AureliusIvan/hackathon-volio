@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { answerImageQuestion, searchSpecificTopic, isExaAvailable } from '../../../utils/exa';
 
 export async function POST(req: NextRequest) {
   try {
@@ -44,6 +45,21 @@ export async function POST(req: NextRequest) {
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
     
+    // Determine if web search might be helpful
+    const needsWebSearch = isExaAvailable() && (
+      userMessage.toLowerCase().includes('what is') ||
+      userMessage.toLowerCase().includes('tell me about') ||
+      userMessage.toLowerCase().includes('information about') ||
+      userMessage.toLowerCase().includes('how does') ||
+      userMessage.toLowerCase().includes('how to') ||
+      userMessage.toLowerCase().includes('where can i') ||
+      userMessage.toLowerCase().includes('when was') ||
+      userMessage.toLowerCase().includes('who made') ||
+      userMessage.toLowerCase().includes('latest') ||
+      userMessage.toLowerCase().includes('current') ||
+      userMessage.toLowerCase().includes('recent')
+    );
+
     // Create conversation prompt
     const prompt = `You are NaraNetra, an AI assistant for the visually impaired. You are in CONVERSATION MODE.
 
@@ -105,14 +121,96 @@ Remember: You're having a conversation, not just describing an image. Respond to
             }
           }
           
-          // Send completion data
-          const completeData = {
-            type: 'complete',
-            response: fullText,
-            userMessage: userMessage,
-            timestamp: new Date().toISOString()
-          };
-          controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
+          // Enhanced response with web search if needed
+          if (needsWebSearch) {
+            try {
+              // Send web search status
+              const searchStatusData = {
+                type: 'web_search_start',
+                message: 'Searching for additional information...'
+              };
+              controller.enqueue(`data: ${JSON.stringify(searchStatusData)}\n\n`);
+
+              // Try to get specific information based on the question
+              let webInfo = null;
+              
+              // First, try to answer the question directly
+              webInfo = await answerImageQuestion(userMessage, fullText);
+              
+              // If that doesn't work, try searching for specific topics
+              if (!webInfo) {
+                // Extract key terms from the user message for search
+                const searchTerms = userMessage
+                  .toLowerCase()
+                  .replace(/what is|tell me about|information about|how does|how to/g, '')
+                  .trim();
+                
+                if (searchTerms.length > 2) {
+                  const searchResults = await searchSpecificTopic(searchTerms, 'current information');
+                  if (searchResults && searchResults.results.length > 0) {
+                    webInfo = searchResults.results[0].summary || 
+                             searchResults.results[0].text?.substring(0, 300);
+                  }
+                }
+              }
+
+              if (webInfo) {
+                // Send web search results
+                const webSearchData = {
+                  type: 'web_search_results',
+                  searchQuery: userMessage,
+                  webInfo: webInfo
+                };
+                controller.enqueue(`data: ${JSON.stringify(webSearchData)}\n\n`);
+
+                // Create enhanced response
+                const enhancedResponse = `${fullText}\n\nLatest Information: ${webInfo}`;
+                
+                // Send enhanced completion data
+                const enhancedCompleteData = {
+                  type: 'complete',
+                  response: enhancedResponse,
+                  originalResponse: fullText,
+                  webInfo: webInfo,
+                  userMessage: userMessage,
+                  timestamp: new Date().toISOString(),
+                  hasWebSearch: true
+                };
+                controller.enqueue(`data: ${JSON.stringify(enhancedCompleteData)}\n\n`);
+              } else {
+                // Send regular completion if no useful web info
+                const completeData = {
+                  type: 'complete',
+                  response: fullText,
+                  userMessage: userMessage,
+                  timestamp: new Date().toISOString(),
+                  hasWebSearch: false
+                };
+                controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
+              }
+            } catch (searchError) {
+              console.error('Conversation web search error:', searchError);
+              // Send regular completion on search error
+              const completeData = {
+                type: 'complete',
+                response: fullText,
+                userMessage: userMessage,
+                timestamp: new Date().toISOString(),
+                hasWebSearch: false
+              };
+              controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
+            }
+          } else {
+            // Send regular completion when web search not needed
+            const completeData = {
+              type: 'complete',
+              response: fullText,
+              userMessage: userMessage,
+              timestamp: new Date().toISOString(),
+              hasWebSearch: false
+            };
+            controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
+          }
           
         } catch (error: unknown) {
           console.error('Error in streaming conversation:', error);

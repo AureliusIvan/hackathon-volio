@@ -7,17 +7,26 @@
    cp env.template .env.local
    ```
 
-2. **Add Your Google AI API Key**
-   Open `.env.local` and replace `your_google_ai_api_key_here` with your actual API key:
+2. **Add Your API Keys**
+   Open `.env.local` and replace the placeholder values with your actual API keys:
    ```
-   GOOGLE_API_KEY=your_actual_api_key_here
+   GOOGLE_API_KEY=your_actual_google_api_key_here
+   EXA_API_KEY=your_actual_exa_api_key_here
    ```
 
-3. **Get Your API Key**
+3. **Get Your API Keys**
+
+   **Google AI API Key (Required):**
    - Visit [Google AI Studio](https://makersuite.google.com/app/apikey)
    - Sign in with your Google account
    - Click "Create API Key"
    - Copy the generated key
+
+   **Exa AI API Key (Required for Web Search):**
+   - Visit [Exa AI Dashboard](https://dashboard.exa.ai/)
+   - Sign up for an account
+   - Navigate to API settings
+   - Generate and copy your API key
 
 4. **Test the Application**
    - The development server should already be running at http://localhost:3000
@@ -46,6 +55,9 @@ Since Gemini 2.5's native audio API is currently in preview:
 - Audio descriptions with visual display
 - Description history with timestamps
 - PWA installation and offline caching
+- **NEW:** Agentic web search integration with Exa AI
+- **NEW:** Enhanced responses with real-time information
+- **NEW:** Intelligent question answering about visible objects
 
 ✅ **Enhanced Audio**
 - Voice speed control (slow/normal/fast)
@@ -58,6 +70,14 @@ Since Gemini 2.5's native audio API is currently in preview:
 - Keyboard navigation support
 - High contrast visual elements
 - ARIA labels and semantic HTML
+
+✅ **Agentic Web Search**
+- Automatic topic extraction from image analysis
+- Real-time web search for discovered objects/topics
+- Enhanced descriptions with current information
+- Smart conversation enhancement for user questions
+- Visual indicators for web search progress
+- Context-aware search queries based on user intent
 
 ## Important Notes
 
@@ -85,9 +105,10 @@ Since Gemini 2.5's native audio API is currently in preview:
 ### Common Issues
 
 - **"Camera access denied"**: Check browser permissions and refresh
-- **"Server configuration error"**: Verify your API key is correctly set in `.env.local`
+- **"Server configuration error"**: Verify your API keys are correctly set in `.env.local`
 - **"No internet connection"**: Check your network connection
 - **Build issues**: Make sure all dependencies are installed with `npm install`
+- **Web search not working**: Verify EXA_API_KEY is set (web search gracefully falls back if unavailable)
 
 ### API Quota Issues
 
@@ -115,9 +136,16 @@ Since Gemini 2.5's native audio API is currently in preview:
 - Try different browser if issues persist
 - Voice styles enhance Web TTS until Gemini TTS available
 
-## Testing Without API Key
+## Testing Without API Keys
 
-The app will build and run without an API key, but image analysis will fail. You'll see appropriate error messages guiding you to set up the API key.
+**Without Google API Key:**
+- The app will build and run but image analysis will fail
+- You'll see appropriate error messages guiding you to set up the API key
+
+**Without Exa API Key:**
+- Core image analysis will work normally
+- Web search features will be disabled (graceful fallback)
+- Visual indicators will show when web search is unavailable
 
 ## Production Deployment
 
@@ -131,6 +159,8 @@ For production deployment:
 
 - **✅ Core MVP**: Complete and functional
 - **✅ Enhanced Audio**: Web Speech API with controls
+- **✅ Agentic Web Search**: Exa AI integration complete
+- **✅ Smart Conversations**: Context-aware question answering
 - **🔄 Gemini TTS**: Framework ready, awaiting API availability
 - **✅ PWA Support**: Installable with offline capabilities
 - **✅ Accessibility**: Full screen reader and keyboard support

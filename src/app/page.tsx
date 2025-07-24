@@ -28,6 +28,8 @@ export default function CameraView() {
     speed: 'fast'
   });
   const [geminiTTSAvailable, setGeminiTTSAvailable] = useState<boolean>(false);
+  const [isWebSearching, setIsWebSearching] = useState<boolean>(false);
+  const [hasWebResults, setHasWebResults] = useState<boolean>(false);
 
   // New mode system states
   const [currentMode, setCurrentMode] = useState<AppMode>('narration');
@@ -179,6 +181,15 @@ export default function CameraView() {
                       };
                       setCurrentDescription(currentDescription);
                       
+                    } else if (data.type === 'web_search_start') {
+                      // Web search started - show loading indicator
+                      setIsWebSearching(true);
+                      console.log('Web search started:', data.message);
+                    } else if (data.type === 'web_search_results') {
+                      // Web search results received
+                      setIsWebSearching(false);
+                      setHasWebResults(true);
+                      console.log('Web search results:', data);
                     } else if (data.type === 'complete') {
                       // Analysis complete
                       const finalDescription: Description = {
@@ -279,6 +290,15 @@ export default function CameraView() {
                         speakWithSettings(fullText);
                       }
                       
+                    } else if (data.type === 'web_search_start') {
+                      // Web search started for conversation
+                      setIsWebSearching(true);
+                      console.log('Conversation web search started:', data.message);
+                    } else if (data.type === 'web_search_results') {
+                      // Web search results for conversation
+                      setIsWebSearching(false);
+                      setHasWebResults(true);
+                      console.log('Conversation web search results:', data);
                     } else if (data.type === 'complete') {
                       // Conversation complete
                       
@@ -383,6 +403,8 @@ export default function CameraView() {
         setIsLoading(true);
         setError(null);
         setFocusTimer(0);
+        setIsWebSearching(false);
+        setHasWebResults(false);
 
         const imageDataUrl = await captureImage();
         if (!imageDataUrl) return;
@@ -601,6 +623,8 @@ export default function CameraView() {
       if (finalTranscript.trim()) {
         try {
           setIsLoading(true);
+          setIsWebSearching(false);
+          setHasWebResults(false);
 
           const imageDataUrl = await captureImage();
           if (!imageDataUrl) return;
@@ -864,6 +888,12 @@ export default function CameraView() {
               {currentDescription.mode === 'narration' ? '📖' : '🧭'} {currentDescription.mode.toUpperCase()}
               {ttsSettings.useGeminiTTS && geminiTTSAvailable && (
                 <span className="text-xs bg-green-600 px-2 py-1 rounded ml-2">Gemini TTS</span>
+              )}
+              {isWebSearching && (
+                <span className="text-xs bg-blue-600 px-2 py-1 rounded ml-2 animate-pulse">🔍 Searching Web...</span>
+              )}
+              {hasWebResults && !isWebSearching && (
+                <span className="text-xs bg-purple-600 px-2 py-1 rounded ml-2">🌐 Enhanced</span>
               )}:
             </h3>
             <div className="flex space-x-2">

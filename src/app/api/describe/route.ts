@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { searchImageTopics, isExaAvailable } from '../../../utils/exa';
 
 export async function POST(req: NextRequest) {
   try {
@@ -113,18 +114,94 @@ Describe the image
             }
           }
 
-          // Send completion data
-          const completeData = {
-            type: 'complete',
-            fullText: fullText,
-            mode: mode,
-            timestamp: new Date().toISOString()
-          };
-          controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
+          // Enhanced response with web search for narration mode
+          if (mode === 'narration' && isExaAvailable()) {
+            try {
+              // Send web search status
+              const searchStatusData = {
+                type: 'web_search_start',
+                message: 'Searching for additional information...'
+              };
+              controller.enqueue(`data: ${JSON.stringify(searchStatusData)}\n\n`);
 
-          // For future EXA integration in narration mode
-          if (mode === 'narration') {
-            console.log('Narration mode - detailed analysis completed');
+              // Perform web search based on image description
+              const searchResults = await searchImageTopics(fullText, mode);
+              
+              if (searchResults && searchResults.results.length > 0) {
+                // Send web search results
+                const webSearchData = {
+                  type: 'web_search_results',
+                  searchQuery: searchResults.searchQuery,
+                  results: searchResults.results.slice(0, 2), // Limit to top 2 results
+                  totalResults: searchResults.totalResults
+                };
+                controller.enqueue(`data: ${JSON.stringify(webSearchData)}\n\n`);
+
+                // Create enhanced description with web info
+                const webInfo = searchResults.results
+                  .slice(0, 2)
+                  .map(result => result.summary || result.text?.substring(0, 200))
+                  .filter(Boolean)
+                  .join(' ');
+
+                if (webInfo) {
+                  const enhancedText = `${fullText}\n\nAdditional Information: ${webInfo}`;
+                  
+                  // Send enhanced complete data
+                  const enhancedCompleteData = {
+                    type: 'complete',
+                    fullText: enhancedText,
+                    originalText: fullText,
+                    webInfo: webInfo,
+                    mode: mode,
+                    timestamp: new Date().toISOString(),
+                    hasWebSearch: true
+                  };
+                  controller.enqueue(`data: ${JSON.stringify(enhancedCompleteData)}\n\n`);
+                } else {
+                  // Send regular completion if no useful web info
+                  const completeData = {
+                    type: 'complete',
+                    fullText: fullText,
+                    mode: mode,
+                    timestamp: new Date().toISOString(),
+                    hasWebSearch: false
+                  };
+                  controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
+                }
+              } else {
+                // Send regular completion if no search results
+                const completeData = {
+                  type: 'complete',
+                  fullText: fullText,
+                  mode: mode,
+                  timestamp: new Date().toISOString(),
+                  hasWebSearch: false
+                };
+                controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
+              }
+            } catch (searchError) {
+              console.error('Web search error:', searchError);
+              // Send regular completion on search error
+              const completeData = {
+                type: 'complete',
+                fullText: fullText,
+                mode: mode,
+                timestamp: new Date().toISOString(),
+                hasWebSearch: false
+              };
+              controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
+            }
+          } else {
+            // Send regular completion for guidance mode or when Exa not available
+            const completeData = {
+              type: 'complete',
+              fullText: fullText,
+              mode: mode,
+              timestamp: new Date().toISOString(),
+              hasWebSearch: false
+            };
+            controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
           }
 
         } catch (error: unknown) {
