@@ -174,4 +174,91 @@ export async function isGeminiTTSAvailable(): Promise<boolean> {
 }
 
 // Legacy function for backward compatibility
-export { speak as default }; 
+export { speak as default };
+
+// Speech Recognition functionality for AI conversation
+export class SpeechRecognition {
+  private recognition: any = null;
+  private isRecording = false;
+  private onResultCallback: ((transcript: string) => void) | null = null;
+  private onErrorCallback: ((error: string) => void) | null = null;
+
+  constructor() {
+    // Check for browser support
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    
+    if (SpeechRecognition) {
+      this.recognition = new SpeechRecognition();
+      this.recognition.continuous = true;
+      this.recognition.interimResults = true;
+      this.recognition.lang = 'en-US';
+      
+      this.recognition.onresult = (event: any) => {
+        let finalTranscript = '';
+        
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          }
+        }
+        
+        if (finalTranscript && this.onResultCallback) {
+          this.onResultCallback(finalTranscript.trim());
+        }
+      };
+      
+      this.recognition.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        if (this.onErrorCallback) {
+          this.onErrorCallback(event.error);
+        }
+      };
+      
+      this.recognition.onend = () => {
+        this.isRecording = false;
+      };
+    }
+  }
+
+  public isSupported(): boolean {
+    return this.recognition !== null;
+  }
+
+  public startRecording(
+    onResult: (transcript: string) => void,
+    onError: (error: string) => void
+  ): boolean {
+    if (!this.recognition || this.isRecording) {
+      return false;
+    }
+
+    this.onResultCallback = onResult;
+    this.onErrorCallback = onError;
+    
+    try {
+      this.recognition.start();
+      this.isRecording = true;
+      return true;
+    } catch (error) {
+      console.error('Failed to start speech recognition:', error);
+      return false;
+    }
+  }
+
+  public stopRecording(): void {
+    if (this.recognition && this.isRecording) {
+      this.recognition.stop();
+      this.isRecording = false;
+    }
+  }
+
+  public getRecordingState(): boolean {
+    return this.isRecording;
+  }
+}
+
+// Utility function to create a speech recognition instance
+export function createSpeechRecognition(): SpeechRecognition {
+  return new SpeechRecognition();
+} 
