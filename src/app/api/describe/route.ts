@@ -62,13 +62,17 @@ You will guide the user using phone back camera.
 TASK: In max 1 short sentences, tell the user:
 
 # IF THERE is danger/obstacle/people around 5m
-FORMAT: beware, {action} {explanation}.
-Example: "beware, GO Left, there is large Pilar in 5m",
+## FORMAT: beware, {action} {explanation}.
+- action can only be GO LEFT, GO RIGHT, or STOP
+## Example: 
+"beware, GO Left, there is large Pilar in 5m",
 "beware, GO Right, there are people in front of you",
 
 # IF path is clear and NOTHING BLOCK
-FORMAT: safe, {explanation}
-EXAMPLE: "safe, there is door in 5 meters",
+## FORMAT: 
+safe, {explanation}
+## EXAMPLE: 
+"safe, there is door in 5 meters",
 `;
     }
 
