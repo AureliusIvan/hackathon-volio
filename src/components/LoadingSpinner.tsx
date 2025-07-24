@@ -1,9 +1,9 @@
 export default function LoadingSpinner() {
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-6 flex flex-col items-center space-y-4">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-        <p className="text-lg font-medium text-gray-800">Analyzing image...</p>
+    <div className="fixed top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-50 pointer-events-none">
+      <div className="bg-black bg-opacity-80 backdrop-blur-sm rounded-xl p-4 flex flex-col items-center space-y-3 border border-gray-600">
+        <div className="animate-spin rounded-full h-8 w-8 border-2 border-white border-t-transparent"></div>
+        <p className="text-sm font-medium text-white">Analyzing image...</p>
       </div>
     </div>
   );
