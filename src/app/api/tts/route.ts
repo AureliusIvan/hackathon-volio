@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { ElevenLabsClient, play } from '@elevenlabs/elevenlabs-js';
 
 export async function POST(req: NextRequest) {
   let requestText = '';
@@ -23,72 +23,68 @@ export async function POST(req: NextRequest) {
     }
     
     // Check for API key
-    const apiKey = process.env.GOOGLE_API_KEY;
+    const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey) {
-      console.error('GOOGLE_API_KEY not found in environment variables');
+      console.error('ELEVENLABS_API_KEY not found in environment variables');
       return NextResponse.json(
         { error: 'Server configuration error' },
         { status: 500 }
       );
     }
     
-    // Initialize Gemini with TTS model
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash-preview-tts",
+    // Initialize ElevenLabs client
+    const elevenlabs = new ElevenLabsClient({
+      apiKey: apiKey
     });
     
-    console.log('Using Gemini 2.5 Flash Preview TTS for:', text.substring(0, 50) + '...');
+    console.log('Using ElevenLabs TTS for:', text.substring(0, 50) + '...');
     console.log('Voice style:', voice, 'Speed:', speed);
     
-    // Generate TTS with Gemini
-    const voicePrompt = voice === 'default' ? 'warm and friendly' : voice;
-    const speedPrompt = speed === 'fast' ? 'at a slightly faster pace' : 
-                       speed === 'slow' ? 'at a slower, more deliberate pace' : 
-                       'at a normal speaking pace';
+    // Map voice styles to ElevenLabs voice IDs
+    const voiceMap: { [key: string]: string } = {
+      'default': 'jqcCZkN6Knx8BJ5TBdYR', // Zara - warm, friendly
+      'warm': 'pNInz6obpgDQGcFmaJgB',    // Adam
+      'friendly': 'EXAVITQu4vr4xnSDxMaL', // Bella - warm, friendly
+      'professional': 'ErXwobaYiN019PkySvjV', // Antoni - well-rounded
+      'calm': 'AZnzlk1XvdvUeBnXmlld',    // Domi - comforting
+      'zepyhr': 'pNInz6obpgDQGcFmaJgB'   // Fallback to Adam
+    };
     
-    const prompt = `Generate natural speech audio with a ${voicePrompt} voice ${speedPrompt} for the following text: "${text}"`;
-    const result = await model.generateContent(prompt);
+    const voiceId = voiceMap[voice] || voiceMap['default'];
     
-    // Check if we got audio data back
-    if (result.response && result.response.candidates && result.response.candidates[0]) {
-      const candidate = result.response.candidates[0];
-      
-      // If audio data is available, return it
-      if (candidate.content && candidate.content.parts) {
-        for (const part of candidate.content.parts) {
-          if (part.inlineData && part.inlineData.mimeType?.startsWith('audio/')) {
-            const audioBuffer = Buffer.from(part.inlineData.data, 'base64');
-            return new Response(audioBuffer, {
-              headers: { 
-                'Content-Type': part.inlineData.mimeType,
-                'Content-Length': audioBuffer.length.toString()
-              }
-            });
-          }
-        }
-      }
-    }
-    
-    // If no audio data, fallback to Web Speech API
-    return NextResponse.json({ 
+    // Generate TTS with ElevenLabs using streaming for faster response
+    const audioStream = await elevenlabs.textToSpeech.convertAsStream(voiceId, {
       text: text,
-      fallback: true,
-      message: 'Gemini TTS response received but no audio data - using Web Speech API',
-      voiceStyle: voice,
-      speed: speed
+      model_id: "eleven_flash_v2",
+      voice_settings: {
+        stability: 0.5,
+        similarity_boost: 0.75,
+        style: 0.5,
+        use_speaker_boost: true
+      },
+      optimize_streaming_latency: 4, // Maximize streaming latency optimization
+      output_format: "mp3_44100_128" // Optimized format for web
+    });
+    
+    // Return streaming response directly
+    return new Response(audioStream, {
+      headers: { 
+        'Content-Type': 'audio/mpeg',
+        'Transfer-Encoding': 'chunked',
+        'Cache-Control': 'no-cache'
+      }
     });
     
   } catch (error: unknown) {
-    console.error('Error in TTS generation:', error);
+    console.error('Error in ElevenLabs TTS generation:', error);
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
-    // Handle specific errors similar to describe route
-    if (errorMessage.includes('429') || errorMessage.includes('Quota exceeded')) {
+    // Handle specific ElevenLabs errors
+    if (errorMessage.includes('429') || errorMessage.includes('quota') || errorMessage.includes('rate limit')) {
       return NextResponse.json(
         { 
-          error: 'TTS quota exceeded. Please wait a moment and try again.',
+          error: 'ElevenLabs TTS quota exceeded. Please wait a moment and try again.',
           errorType: 'RATE_LIMIT_EXCEEDED',
           retryAfter: 60,
           fallback: true,
@@ -98,10 +94,10 @@ export async function POST(req: NextRequest) {
       );
     }
     
-    if (errorMessage.includes('403') || errorMessage.includes('API key')) {
+    if (errorMessage.includes('401') || errorMessage.includes('403') || errorMessage.includes('API key')) {
       return NextResponse.json(
         { 
-          error: 'Invalid API key for TTS.',
+          error: 'Invalid ElevenLabs API key.',
           errorType: 'INVALID_API_KEY',
           fallback: true,
           text: requestText
@@ -110,10 +106,22 @@ export async function POST(req: NextRequest) {
       );
     }
     
+    if (errorMessage.includes('voice_id')) {
+      return NextResponse.json(
+        { 
+          error: 'Invalid voice ID for ElevenLabs TTS.',
+          errorType: 'INVALID_VOICE',
+          fallback: true,
+          text: requestText
+        },
+        { status: 400 }
+      );
+    }
+    
     // Generic error with fallback
     return NextResponse.json(
       { 
-        error: 'TTS generation failed, using browser fallback.',
+        error: 'ElevenLabs TTS generation failed, using browser fallback.',
         errorType: 'TTS_ERROR',
         fallback: true,
         text: requestText
