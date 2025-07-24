@@ -120,7 +120,6 @@ export default function CameraView() {
   ): Promise<Description> => {
     return new Promise((resolve, reject) => {
       let fullText = '';
-      let hasStartedSpeaking = false;
       let currentDescription: Description | null = null;
 
       // Send the request data via POST (we'll modify this approach)
@@ -167,12 +166,7 @@ export default function CameraView() {
                     } else if (data.type === 'chunk') {
                       fullText = data.fullText;
                       
-                      // Start speaking after we have a meaningful chunk (≥30 chars) - but not for single tap
-                      if (!singleTap && !hasStartedSpeaking && fullText.length >= 30) {
-                        hasStartedSpeaking = true;
-                        // Start speaking the first chunk
-                        speakWithSettings(fullText);
-                      }
+                      // Note: Wait for complete response before speaking to avoid interruption
                       
                       // Update current description for live display
                       currentDescription = {
@@ -199,10 +193,8 @@ export default function CameraView() {
                         mode: mode
                       };
                       
-                      // If we haven't started speaking yet, speak the full text (but not for single tap)
-                      if (!singleTap && !hasStartedSpeaking) {
-                        await speakWithSettings(data.fullText);
-                      }
+                      // Start speaking the complete final text (non-blocking)
+                      speakWithSettings(data.fullText);
                       
                       resolve(finalDescription);
                       return;
@@ -234,7 +226,7 @@ export default function CameraView() {
 
   // Conversation functionality removed for narration mode
 
-  // Enhanced single tap object detection (immediate response)
+  // Enhanced single tap object detection with TTS narration
   const handleSingleTapDetection = useCallback(async (): Promise<void> => {
     if (isLoading || !isCameraReady) return;
 
@@ -250,7 +242,7 @@ export default function CameraView() {
       const imageDataUrl = await captureImage();
       if (!imageDataUrl) return;
 
-      // Use streaming analysis with single tap mode (no auto-voice)
+      // Use streaming analysis with single tap mode (includes TTS narration)
       const newDescription = await streamAnalysis(imageDataUrl, 'narration', true);
       
       if (newDescription) {
