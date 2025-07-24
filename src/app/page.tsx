@@ -337,50 +337,6 @@ export default function CameraView() {
     }
   }, [lastImageHash, imageCache, streamAnalysis, lastGuidanceUpdate]);
 
-  // Optimized narration mode capture with debouncing and similarity detection
-  const handleNarrationCapture = useCallback(async () => {
-    if (isLoading || !isCameraReady) return;
-
-    // Clear existing debounce timer
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
-    // Debounce the analysis by 500ms
-    debounceTimerRef.current = setTimeout(async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        setFocusTimer(0);
-        setIsWebSearching(false);
-        setHasWebResults(false);
-
-        const imageDataUrl = await captureImage();
-        if (!imageDataUrl) return;
-
-        // Use optimized analysis with similarity detection and caching
-        const newDescription = await optimizedAnalysis(imageDataUrl, 'narration');
-        
-        // Only update if we got a new description (not skipped due to similarity)
-        if (newDescription) {
-          setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
-        }
-
-        setRetryCount(0);
-
-      } catch (err) {
-        console.error('Narration capture error:', err);
-        const errorMessage = 'Sorry, an error occurred during analysis. Please try again.';
-        setError(errorMessage);
-        await speakWithSettings(errorMessage, { forceWebTTS: true });
-      } finally {
-        setIsLoading(false);
-      }
-    }, 500);
-  }, [isLoading, isCameraReady, captureImage, optimizedAnalysis, speakWithSettings]);
-
-
-
   // Mode switching function
   const switchMode = useCallback(async (newMode: AppMode) => {
     if (newMode === currentMode) return;
@@ -432,6 +388,8 @@ export default function CameraView() {
           if (imageDataUrl) {
             // Use optimized analysis with similarity detection and caching
             const newDescription = await optimizedAnalysis(imageDataUrl, 'guidance');
+
+            // TODO: I think we need to wait until the previous on is finished
             
             // Only update if we got a new description (not skipped due to similarity)
             if (newDescription) {
