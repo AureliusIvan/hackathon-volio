@@ -365,7 +365,7 @@ export default function CameraView() {
     setTimeout(async () => {
       // Announce mode switch with high priority
       if (newMode === 'narration') {
-        await speakWithSettings('Narration Mode is on now. Tap for object detection.', { priority: 'high' });
+        await speakWithSettings('Narration Mode is on now. Tap for analyze object .', { priority: 'high' });
         setFocusTimer(0);
       } else {
         await speakWithSettings('Guidance Mode is on now. Navigation assistance every 4 seconds.', { priority: 'high' });
@@ -651,7 +651,7 @@ export default function CameraView() {
             <div className={`text-center p-2 rounded-lg ${currentMode === 'narration' ? 'bg-blue-600' : 'bg-blue-400'
               } bg-opacity-80 text-white`}>
               <h3 className="text-sm font-semibold">📖 NARRATION MODE</h3>
-              <p className="text-xs">Tap for instant object detection</p>
+              <p className="text-xs">Tap for analze object</p>
               {currentMode === 'narration' && focusTimer > 0 && (
                 <p className="text-xs mt-1">Capturing in {focusTimer.toFixed(1)}s...</p>
               )}
@@ -768,7 +768,7 @@ export default function CameraView() {
       )}
 
       {/* TTS Controls Button */}
-      <button
+      {/* <button
         onClick={(e) => {
           e.stopPropagation();
           setShowTTSControls(!showTTSControls);
@@ -779,10 +779,10 @@ export default function CameraView() {
         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
         </svg>
-      </button>
+      </button> */}
 
       {/* TTS Controls Panel */}
-      {showTTSControls && (
+      {/* {showTTSControls && (
         <div className="absolute top-16 left-4 bg-black bg-opacity-90 text-white p-4 rounded-lg border border-gray-600 z-50">
           <h3 className="text-sm font-semibold mb-3">Voice Settings</h3>
 
@@ -840,7 +840,7 @@ export default function CameraView() {
             </button>
           </div>
         </div>
-      )}
+      )} */}
 
       {/* History Toggle Button */}
       {descriptionHistory.length > 1 && !isLoading && (
@@ -859,7 +859,7 @@ export default function CameraView() {
       )}
 
       {/* Description History */}
-      {showHistory && descriptionHistory.length > 1 && (
+      {/* {showHistory && descriptionHistory.length > 1 && (
         <div className="absolute left-4 right-4 top-20 bottom-24 bg-black bg-opacity-90 text-white p-4 rounded-lg border border-gray-600 overflow-y-auto z-40">
           <div className="flex justify-between items-center mb-4">
             <h3 className="text-lg font-semibold text-blue-300">Description History</h3>
@@ -907,7 +907,7 @@ export default function CameraView() {
             ))}
           </div>
         </div>
-      )}
+      )} */}
 
       {/* Error display */}
       {error && (
