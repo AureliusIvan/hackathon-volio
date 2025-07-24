@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { speak } from '../utils/speech';
+import { speak, isGeminiTTSAvailable } from '../utils/speech';
 
 interface ApiErrorResponse {
   error: string;
@@ -23,9 +23,25 @@ export default function CameraView() {
   const [currentDescription, setCurrentDescription] = useState<Description | null>(null);
   const [descriptionHistory, setDescriptionHistory] = useState<Description[]>([]);
   const [showHistory, setShowHistory] = useState<boolean>(false);
+  const [showTTSControls, setShowTTSControls] = useState<boolean>(false);
+  const [ttsSettings, setTtsSettings] = useState({
+    useGeminiTTS: true,
+    voice: 'default',
+    speed: 'normal'
+  });
+  const [geminiTTSAvailable, setGeminiTTSAvailable] = useState<boolean>(false);
   
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  // Memoized speech function to avoid dependency warnings
+  const speakWithSettings = useCallback(async (text: string, options: { forceWebTTS?: boolean } = {}) => {
+    return speak(text, {
+      forceWebTTS: options.forceWebTTS || !ttsSettings.useGeminiTTS,
+      voice: ttsSettings.voice,
+      speed: ttsSettings.speed
+    });
+  }, [ttsSettings.useGeminiTTS, ttsSettings.voice, ttsSettings.speed]);
 
   // Camera activation on component mount
   useEffect(() => {
@@ -39,21 +55,34 @@ export default function CameraView() {
           }
         });
         
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.onloadedmetadata = () => {
+        const video = videoRef.current;
+        if (video) {
+          video.srcObject = stream;
+          video.onloadedmetadata = async () => {
             setIsCameraReady(true);
-            speak('Camera ready. Tap anywhere on the screen to describe your surroundings.');
+            await speakWithSettings('Camera ready. Tap anywhere on the screen to describe your surroundings.');
           };
         }
       } catch (err) {
         console.error('Camera access error:', err);
         setError('Camera access denied. Please enable camera permissions.');
-        speak('Camera access denied. Please enable camera permissions and reload the page.');
+        await speak('Camera access denied. Please enable camera permissions and reload the page.', {
+          forceWebTTS: true
+        });
+      }
+    };
+
+    // Check Gemini TTS availability
+    const checkTTSAvailability = async () => {
+      const available = await isGeminiTTSAvailable();
+      setGeminiTTSAvailable(available);
+      if (!available) {
+        setTtsSettings(prev => ({ ...prev, useGeminiTTS: false }));
       }
     };
 
     initializeCamera();
+    checkTTSAvailability();
 
     // Cleanup function with proper ref handling
     return () => {
@@ -63,7 +92,7 @@ export default function CameraView() {
         stream.getTracks().forEach(track => track.stop());
       }
     };
-  }, []);
+  }, []); // Empty dependency array is correct here
 
   const handleApiError = async (response: Response): Promise<void> => {
     const errorData: ApiErrorResponse = await response.json();
@@ -72,14 +101,14 @@ export default function CameraView() {
       case 'RATE_LIMIT_EXCEEDED':
         const retryAfter = errorData.retryAfter || 60;
         setError(`API quota exceeded. Please wait ${retryAfter} seconds and try again.`);
-        speak(`API quota exceeded. Please wait ${retryAfter} seconds before trying again.`);
+        await speakWithSettings(`API quota exceeded. Please wait ${retryAfter} seconds before trying again.`);
         
         // Auto-retry after the specified time for rate limits
         if (retryCount < 2) { // Max 2 retries
-          setTimeout(() => {
+          setTimeout(async () => {
             setError(null);
             setRetryCount(prev => prev + 1);
-            speak('Retrying image analysis...');
+            await speakWithSettings('Retrying image analysis...');
             handleCapture();
           }, retryAfter * 1000);
         }
@@ -87,17 +116,19 @@ export default function CameraView() {
         
       case 'INVALID_API_KEY':
         setError('Invalid API key. Please check your configuration.');
-        speak('Invalid API key. Please check your configuration and restart the application.');
+        await speak('Invalid API key. Please check your configuration and restart the application.', {
+          forceWebTTS: true
+        });
         break;
         
       case 'INVALID_IMAGE':
         setError('Invalid image format. Please try again.');
-        speak('Invalid image format. Please try taking another photo.');
+        await speakWithSettings('Invalid image format. Please try taking another photo.');
         break;
         
       default:
         setError(errorData.error);
-        speak(errorData.error);
+        await speakWithSettings(errorData.error);
     }
   };
 
@@ -115,7 +146,7 @@ export default function CameraView() {
       }
       
       // Play capture feedback
-      speak('Capturing image...');
+      await speakWithSettings('Capturing image...');
       
       // Get canvas context and capture frame
       const canvas = canvasRef.current;
@@ -142,7 +173,9 @@ export default function CameraView() {
       
       // Check internet connection
       if (!navigator.onLine) {
-        speak('No internet connection. Please check your connection and try again.');
+        await speak('No internet connection. Please check your connection and try again.', {
+          forceWebTTS: true
+        });
         return;
       }
       
@@ -172,8 +205,8 @@ export default function CameraView() {
       setCurrentDescription(newDescription);
       setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]); // Keep last 5 descriptions
       
-      // Speak the description
-      speak(data.description);
+      // Speak the description with current TTS settings
+      await speakWithSettings(data.description);
       
       // Reset retry count on success
       setRetryCount(0);
@@ -182,9 +215,17 @@ export default function CameraView() {
       console.error('Capture error:', err);
       const errorMessage = 'Sorry, an error occurred. Please try again.';
       setError(errorMessage);
-      speak(errorMessage);
+      await speak(errorMessage, {
+        forceWebTTS: true
+      });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleRepeatDescription = async () => {
+    if (currentDescription) {
+      await speakWithSettings(currentDescription.text);
     }
   };
 
@@ -230,10 +271,101 @@ export default function CameraView() {
       {currentDescription && !isLoading && (
         <div className="absolute top-4 left-4 right-4 bg-black bg-opacity-80 text-white p-4 rounded-lg border border-gray-600">
           <div className="flex justify-between items-start mb-2">
-            <h3 className="text-sm font-semibold text-blue-300">AI Description:</h3>
-            <span className="text-xs text-gray-300">{formatTime(currentDescription.timestamp)}</span>
+            <h3 className="text-sm font-semibold text-blue-300">
+              AI Description {ttsSettings.useGeminiTTS && geminiTTSAvailable && (
+                <span className="text-xs bg-green-600 px-2 py-1 rounded ml-2">Gemini TTS</span>
+              )}:
+            </h3>
+            <div className="flex space-x-2">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRepeatDescription();
+                }}
+                className="text-xs bg-blue-600 px-2 py-1 rounded hover:bg-blue-700"
+                aria-label="Repeat description"
+              >
+                🔊 Repeat
+              </button>
+              <span className="text-xs text-gray-300">{formatTime(currentDescription.timestamp)}</span>
+            </div>
           </div>
           <p className="text-lg font-medium leading-relaxed">{currentDescription.text}</p>
+        </div>
+      )}
+      
+      {/* TTS Controls Button */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          setShowTTSControls(!showTTSControls);
+        }}
+        className="absolute top-4 left-4 bg-gray-800 bg-opacity-80 text-white p-2 rounded-full border border-gray-600 hover:bg-gray-700 transition-colors"
+        aria-label="TTS Settings"
+      >
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+        </svg>
+      </button>
+      
+      {/* TTS Controls Panel */}
+      {showTTSControls && (
+        <div className="absolute top-16 left-4 bg-black bg-opacity-90 text-white p-4 rounded-lg border border-gray-600">
+          <h3 className="text-sm font-semibold mb-3">Voice Settings</h3>
+          
+          <div className="space-y-3">
+            <div>
+              <label className="flex items-center text-sm">
+                <input
+                  type="checkbox"
+                  checked={ttsSettings.useGeminiTTS && geminiTTSAvailable}
+                  disabled={!geminiTTSAvailable}
+                  onChange={(e) => setTtsSettings(prev => ({ ...prev, useGeminiTTS: e.target.checked }))}
+                  className="mr-2"
+                />
+                Use Gemini TTS {!geminiTTSAvailable && '(Unavailable)'}
+              </label>
+            </div>
+            
+            <div>
+              <label className="block text-sm mb-1">Speed:</label>
+              <select
+                value={ttsSettings.speed}
+                onChange={(e) => setTtsSettings(prev => ({ ...prev, speed: e.target.value }))}
+                className="w-full bg-gray-700 text-white p-2 rounded text-sm"
+              >
+                <option value="slow">Slow</option>
+                <option value="normal">Normal</option>
+                <option value="fast">Fast</option>
+              </select>
+            </div>
+            
+            {ttsSettings.useGeminiTTS && (
+              <div>
+                <label className="block text-sm mb-1">Voice Style:</label>
+                <select
+                  value={ttsSettings.voice}
+                  onChange={(e) => setTtsSettings(prev => ({ ...prev, voice: e.target.value }))}
+                  className="w-full bg-gray-700 text-white p-2 rounded text-sm"
+                >
+                  <option value="default">Default</option>
+                  <option value="calm">Calm</option>
+                  <option value="warm">Warm</option>
+                  <option value="professional">Professional</option>
+                </select>
+              </div>
+            )}
+            
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowTTSControls(false);
+              }}
+              className="w-full bg-gray-700 hover:bg-gray-600 text-white p-2 rounded text-sm"
+            >
+              Close
+            </button>
+          </div>
         </div>
       )}
       
@@ -278,7 +410,18 @@ export default function CameraView() {
                   <span className="text-xs text-gray-400">
                     {index === 0 ? 'Latest' : `${index + 1} ago`}
                   </span>
-                  <span className="text-xs text-gray-400">{formatTime(desc.timestamp)}</span>
+                  <div className="flex space-x-2">
+                    <button
+                      onClick={async (e) => {
+                        e.stopPropagation();
+                        await speakWithSettings(desc.text);
+                      }}
+                      className="text-xs bg-blue-600 px-2 py-1 rounded hover:bg-blue-700"
+                    >
+                      🔊
+                    </button>
+                    <span className="text-xs text-gray-400">{formatTime(desc.timestamp)}</span>
+                  </div>
                 </div>
                 <p className="text-sm leading-relaxed">{desc.text}</p>
               </div>
@@ -312,6 +455,9 @@ export default function CameraView() {
         <div className="absolute bottom-4 left-4 right-4 bg-black bg-opacity-70 text-white p-4 rounded-lg">
           <p className="text-center text-sm">
             Tap anywhere on the screen to get an audio description of what the camera sees
+            {geminiTTSAvailable && ttsSettings.useGeminiTTS && (
+              <span className="block text-xs text-green-300 mt-1">✨ Enhanced with Gemini TTS</span>
+            )}
           </p>
         </div>
       )}

@@ -50,11 +50,13 @@ export async function POST(req: NextRequest) {
     // Return the description
     return NextResponse.json({ description: text.trim() });
     
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error in image analysis:', error);
     
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    
     // Handle specific Google AI API errors
-    if (error.message?.includes('429') || error.message?.includes('Quota exceeded')) {
+    if (errorMessage.includes('429') || errorMessage.includes('Quota exceeded')) {
       return NextResponse.json(
         { 
           error: 'API quota exceeded. Please wait a moment and try again.',
@@ -65,7 +67,7 @@ export async function POST(req: NextRequest) {
       );
     }
     
-    if (error.message?.includes('403') || error.message?.includes('API key')) {
+    if (errorMessage.includes('403') || errorMessage.includes('API key')) {
       return NextResponse.json(
         { 
           error: 'Invalid API key. Please check your configuration.',
@@ -75,7 +77,7 @@ export async function POST(req: NextRequest) {
       );
     }
     
-    if (error.message?.includes('400') || error.message?.includes('Bad Request')) {
+    if (errorMessage.includes('400') || errorMessage.includes('Bad Request')) {
       return NextResponse.json(
         { 
           error: 'Invalid image format. Please try again.',
