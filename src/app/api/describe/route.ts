@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export async function POST(req: NextRequest) {
@@ -8,9 +8,12 @@ export async function POST(req: NextRequest) {
     
     // Input validation
     if (!image || typeof image !== 'string') {
-      return NextResponse.json(
-        { error: 'Invalid image data provided' },
-        { status: 400 }
+      return new Response(
+        JSON.stringify({ error: 'Invalid image data provided' }),
+        { 
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        }
       );
     }
     
@@ -18,9 +21,12 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.GOOGLE_API_KEY;
     if (!apiKey) {
       console.error('GOOGLE_API_KEY not found in environment variables');
-      return NextResponse.json(
-        { error: 'Server configuration error' },
-        { status: 500 }
+      return new Response(
+        JSON.stringify({ error: 'Server configuration error' }),
+        { 
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        }
       );
     }
     
@@ -70,72 +76,111 @@ Example format: "Clear path ahead with a doorway on the right. Steps begin in 3 
       }
     };
     
-    // Make the API call to Gemini
-    const result = await model.generateContent([prompt, imagePart]);
-    const response = result.response;
-    const text = response.text();
+    // Create streaming response
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          // Send initial metadata
+          const initialData = {
+            type: 'start',
+            mode: mode,
+            timestamp: new Date().toISOString()
+          };
+          controller.enqueue(`data: ${JSON.stringify(initialData)}\n\n`);
+          
+          // Start streaming from Gemini
+          const result = await model.generateContentStream([prompt, imagePart]);
+          let fullText = '';
+          
+          for await (const chunk of result.stream) {
+            const chunkText = chunk.text();
+            if (chunkText) {
+              fullText += chunkText;
+              
+              // Send chunk data
+              const chunkData = {
+                type: 'chunk',
+                text: chunkText,
+                fullText: fullText,
+                mode: mode
+              };
+              controller.enqueue(`data: ${JSON.stringify(chunkData)}\n\n`);
+            }
+          }
+          
+          // Send completion data
+          const completeData = {
+            type: 'complete',
+            fullText: fullText,
+            mode: mode,
+            timestamp: new Date().toISOString()
+          };
+          controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
+          
+          // For future EXA integration in narration mode
+          if (mode === 'narration') {
+            console.log('Narration mode - detailed analysis completed');
+          }
+          
+        } catch (error: unknown) {
+          console.error('Error in streaming image analysis:', error);
+          
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          
+          // Send error data
+          let errorType = 'UNKNOWN_ERROR';
+          let retryAfter = undefined;
+          
+          if (errorMessage.includes('429') || errorMessage.includes('Quota exceeded')) {
+            errorType = 'RATE_LIMIT_EXCEEDED';
+            retryAfter = 60;
+          } else if (errorMessage.includes('403') || errorMessage.includes('API key')) {
+            errorType = 'INVALID_API_KEY';
+          } else if (errorMessage.includes('400') || errorMessage.includes('Bad Request')) {
+            errorType = 'INVALID_IMAGE';
+          }
+          
+          const errorData = {
+            type: 'error',
+            error: errorMessage.includes('429') ? 'API quota exceeded. Please wait a moment and try again.' :
+                   errorMessage.includes('403') ? 'Invalid API key. Please check your configuration.' :
+                   errorMessage.includes('400') ? 'Invalid image format. Please try again.' :
+                   'Failed to analyze image. Please try again.',
+            errorType: errorType,
+            retryAfter: retryAfter
+          };
+          controller.enqueue(`data: ${JSON.stringify(errorData)}\n\n`);
+        } finally {
+          controller.close();
+        }
+      }
+    });
     
-    // For future EXA integration in narration mode
-    if (mode === 'narration') {
-      // TODO: Add EXA search for additional context
-      // This is where we would search for more detailed information
-      // about objects, landmarks, or cultural items identified in the image
-      
-      // Placeholder for enhanced description
-      console.log('Narration mode - detailed analysis requested');
-    }
-    
-    // Return the description with mode information
-    return NextResponse.json({ 
-      description: text.trim(),
-      mode: mode,
-      timestamp: new Date().toISOString()
+    // Return streaming response with SSE headers
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      },
     });
     
   } catch (error: unknown) {
-    console.error('Error in image analysis:', error);
+    console.error('Error in image analysis setup:', error);
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
-    // Handle specific Google AI API errors
-    if (errorMessage.includes('429') || errorMessage.includes('Quota exceeded')) {
-      return NextResponse.json(
-        { 
-          error: 'API quota exceeded. Please wait a moment and try again.',
-          errorType: 'RATE_LIMIT_EXCEEDED',
-          retryAfter: 60 // seconds
-        },
-        { status: 429 }
-      );
-    }
-    
-    if (errorMessage.includes('403') || errorMessage.includes('API key')) {
-      return NextResponse.json(
-        { 
-          error: 'Invalid API key. Please check your configuration.',
-          errorType: 'INVALID_API_KEY'
-        },
-        { status: 403 }
-      );
-    }
-    
-    if (errorMessage.includes('400') || errorMessage.includes('Bad Request')) {
-      return NextResponse.json(
-        { 
-          error: 'Invalid image format. Please try again.',
-          errorType: 'INVALID_IMAGE'
-        },
-        { status: 400 }
-      );
-    }
-    
-    // Generic error
-    return NextResponse.json(
+    return new Response(
+      JSON.stringify({ 
+        error: 'Failed to process request. Please try again.',
+        errorType: 'SETUP_ERROR'
+      }),
       { 
-        error: 'Failed to analyze image. Please try again.',
-        errorType: 'UNKNOWN_ERROR'
-      },
-      { status: 500 }
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      }
     );
   }
 } 

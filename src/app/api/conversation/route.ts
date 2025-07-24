@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 export async function POST(req: NextRequest) {
@@ -8,16 +8,22 @@ export async function POST(req: NextRequest) {
     
     // Input validation
     if (!image || typeof image !== 'string') {
-      return NextResponse.json(
-        { error: 'Invalid image data provided' },
-        { status: 400 }
+      return new Response(
+        JSON.stringify({ error: 'Invalid image data provided' }),
+        { 
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        }
       );
     }
     
     if (!userMessage || typeof userMessage !== 'string') {
-      return NextResponse.json(
-        { error: 'Invalid user message provided' },
-        { status: 400 }
+      return new Response(
+        JSON.stringify({ error: 'Invalid user message provided' }),
+        { 
+          status: 400,
+          headers: { 'Content-Type': 'application/json' }
+        }
       );
     }
     
@@ -25,9 +31,12 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.GOOGLE_API_KEY;
     if (!apiKey) {
       console.error('GOOGLE_API_KEY not found in environment variables');
-      return NextResponse.json(
-        { error: 'Server configuration error' },
-        { status: 500 }
+      return new Response(
+        JSON.stringify({ error: 'Server configuration error' }),
+        { 
+          status: 500,
+          headers: { 'Content-Type': 'application/json' }
+        }
       );
     }
     
@@ -64,62 +73,106 @@ Remember: You're having a conversation, not just describing an image. Respond to
       }
     };
     
-    // Make the API call to Gemini
-    const result = await model.generateContent([prompt, imagePart]);
-    const response = result.response;
-    const text = response.text();
+    // Create streaming response
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          // Send initial metadata
+          const initialData = {
+            type: 'start',
+            userMessage: userMessage,
+            timestamp: new Date().toISOString()
+          };
+          controller.enqueue(`data: ${JSON.stringify(initialData)}\n\n`);
+          
+          // Start streaming from Gemini
+          const result = await model.generateContentStream([prompt, imagePart]);
+          let fullText = '';
+          
+          for await (const chunk of result.stream) {
+            const chunkText = chunk.text();
+            if (chunkText) {
+              fullText += chunkText;
+              
+              // Send chunk data
+              const chunkData = {
+                type: 'chunk',
+                text: chunkText,
+                fullText: fullText,
+                userMessage: userMessage
+              };
+              controller.enqueue(`data: ${JSON.stringify(chunkData)}\n\n`);
+            }
+          }
+          
+          // Send completion data
+          const completeData = {
+            type: 'complete',
+            response: fullText,
+            userMessage: userMessage,
+            timestamp: new Date().toISOString()
+          };
+          controller.enqueue(`data: ${JSON.stringify(completeData)}\n\n`);
+          
+        } catch (error: unknown) {
+          console.error('Error in streaming conversation:', error);
+          
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+          
+          // Send error data
+          let errorType = 'UNKNOWN_ERROR';
+          let retryAfter = undefined;
+          
+          if (errorMessage.includes('429') || errorMessage.includes('Quota exceeded')) {
+            errorType = 'RATE_LIMIT_EXCEEDED';
+            retryAfter = 60;
+          } else if (errorMessage.includes('403') || errorMessage.includes('API key')) {
+            errorType = 'INVALID_API_KEY';
+          } else if (errorMessage.includes('400') || errorMessage.includes('Bad Request')) {
+            errorType = 'INVALID_INPUT';
+          }
+          
+          const errorData = {
+            type: 'error',
+            error: errorMessage.includes('429') ? 'API quota exceeded. Please wait a moment and try again.' :
+                   errorMessage.includes('403') ? 'Invalid API key. Please check your configuration.' :
+                   errorMessage.includes('400') ? 'Invalid input format. Please try again.' :
+                   'Failed to process conversation. Please try again.',
+            errorType: errorType,
+            retryAfter: retryAfter
+          };
+          controller.enqueue(`data: ${JSON.stringify(errorData)}\n\n`);
+        } finally {
+          controller.close();
+        }
+      }
+    });
     
-    // Return the conversation response
-    return NextResponse.json({ 
-      response: text.trim(),
-      userMessage: userMessage,
-      timestamp: new Date().toISOString()
+    // Return streaming response with SSE headers
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Headers': 'Content-Type',
+      },
     });
     
   } catch (error: unknown) {
-    console.error('Error in conversation:', error);
+    console.error('Error in conversation setup:', error);
     
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     
-    // Handle specific Google AI API errors
-    if (errorMessage.includes('429') || errorMessage.includes('Quota exceeded')) {
-      return NextResponse.json(
-        { 
-          error: 'API quota exceeded. Please wait a moment and try again.',
-          errorType: 'RATE_LIMIT_EXCEEDED',
-          retryAfter: 60 // seconds
-        },
-        { status: 429 }
-      );
-    }
-    
-    if (errorMessage.includes('403') || errorMessage.includes('API key')) {
-      return NextResponse.json(
-        { 
-          error: 'Invalid API key. Please check your configuration.',
-          errorType: 'INVALID_API_KEY'
-        },
-        { status: 403 }
-      );
-    }
-    
-    if (errorMessage.includes('400') || errorMessage.includes('Bad Request')) {
-      return NextResponse.json(
-        { 
-          error: 'Invalid input format. Please try again.',
-          errorType: 'INVALID_INPUT'
-        },
-        { status: 400 }
-      );
-    }
-    
-    // Generic error
-    return NextResponse.json(
+    return new Response(
+      JSON.stringify({ 
+        error: 'Failed to process conversation request. Please try again.',
+        errorType: 'SETUP_ERROR'
+      }),
       { 
-        error: 'Failed to process conversation. Please try again.',
-        errorType: 'UNKNOWN_ERROR'
-      },
-      { status: 500 }
+        status: 500,
+        headers: { 'Content-Type': 'application/json' }
+      }
     );
   }
 } 

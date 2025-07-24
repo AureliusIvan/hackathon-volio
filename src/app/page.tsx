@@ -61,7 +61,7 @@ export default function CameraView() {
     });
   }, [ttsSettings.useGeminiTTS, ttsSettings.voice, ttsSettings.speed]);
 
-  // Helper function to capture image
+  // Helper function to capture image (optimized for speed)
   const captureImage = useCallback(async (): Promise<string | null> => {
     const canvas = canvasRef.current;
     const video = videoRef.current;
@@ -75,18 +75,250 @@ export default function CameraView() {
       throw new Error('Cannot get canvas context');
     }
 
-    // Set canvas dimensions to match video
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    // Optimize dimensions for faster processing (max 800x600)
+    const maxWidth = 800;
+    const maxHeight = 600;
+    const videoWidth = video.videoWidth;
+    const videoHeight = video.videoHeight;
+    
+    // Calculate scaled dimensions maintaining aspect ratio
+    let targetWidth = videoWidth;
+    let targetHeight = videoHeight;
+    
+    if (videoWidth > maxWidth || videoHeight > maxHeight) {
+      const aspectRatio = videoWidth / videoHeight;
+      
+      if (videoWidth > videoHeight) {
+        targetWidth = maxWidth;
+        targetHeight = maxWidth / aspectRatio;
+      } else {
+        targetHeight = maxHeight;
+        targetWidth = maxHeight * aspectRatio;
+      }
+    }
 
-    // Draw current video frame
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    // Set optimized canvas dimensions
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
 
-    // Convert to Base64 JPEG
-    return canvas.toDataURL('image/jpeg', 0.9);
+    // Draw current video frame with scaling
+    context.drawImage(video, 0, 0, targetWidth, targetHeight);
+
+    // Convert to Base64 JPEG with optimized quality for speed
+    return canvas.toDataURL('image/jpeg', 0.7);
   }, []);
 
-  // Narration mode capture with detailed analysis
+  // Helper function for streaming analysis
+  const streamAnalysis = useCallback(async (
+    imageDataUrl: string, 
+    mode: 'narration' | 'guidance'
+  ): Promise<Description> => {
+    return new Promise((resolve, reject) => {
+      const eventSource = new EventSource('/api/describe');
+      let fullText = '';
+      let hasStartedSpeaking = false;
+      let firstChunk = '';
+      let currentDescription: Description | null = null;
+
+      // Send the request data via POST (we'll modify this approach)
+      fetch('/api/describe', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: imageDataUrl,
+          mode: mode
+        }),
+      }).then(response => {
+        if (!response.ok) {
+          throw new Error('Network response was not ok');
+        }
+        return response.body;
+      }).then(body => {
+        if (!body) {
+          throw new Error('No response body');
+        }
+
+        const reader = body.getReader();
+        const decoder = new TextDecoder();
+
+        const readStream = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              
+              if (done) break;
+              
+              const chunk = decoder.decode(value);
+              const lines = chunk.split('\n');
+              
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  try {
+                    const data = JSON.parse(line.slice(6));
+                    
+                    if (data.type === 'start') {
+                      // Analysis started
+                      await speakWithSettings('Analyzing...');
+                    } else if (data.type === 'chunk') {
+                      fullText = data.fullText;
+                      
+                      // Start speaking after we have a meaningful chunk (≥30 chars)
+                      if (!hasStartedSpeaking && fullText.length >= 30) {
+                        hasStartedSpeaking = true;
+                        // Start speaking the first chunk
+                        speakWithSettings(fullText);
+                      }
+                      
+                      // Update current description for live display
+                      currentDescription = {
+                        text: fullText,
+                        timestamp: new Date(),
+                        mode: mode
+                      };
+                      setCurrentDescription(currentDescription);
+                      
+                    } else if (data.type === 'complete') {
+                      // Analysis complete
+                      const finalDescription: Description = {
+                        text: data.fullText,
+                        timestamp: new Date(),
+                        mode: mode
+                      };
+                      
+                      // If we haven't started speaking yet, speak the full text
+                      if (!hasStartedSpeaking) {
+                        await speakWithSettings(data.fullText);
+                      }
+                      
+                      resolve(finalDescription);
+                      return;
+                    } else if (data.type === 'error') {
+                      setError(data.error);
+                      await speakWithSettings(data.error);
+                      reject(new Error(data.error));
+                      return;
+                    }
+                  } catch (parseError) {
+                    console.error('Error parsing SSE data:', parseError);
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error reading stream:', error);
+            reject(error);
+          }
+        };
+
+        readStream();
+      }).catch(error => {
+        console.error('Streaming error:', error);
+        reject(error);
+      });
+    });
+  }, [speakWithSettings]);
+
+  // Helper function for streaming conversation
+  const streamConversation = useCallback(async (
+    imageDataUrl: string, 
+    userMessage: string
+  ): Promise<{response: string; userMessage: string}> => {
+    return new Promise((resolve, reject) => {
+      let fullText = '';
+      let hasStartedSpeaking = false;
+
+      fetch('/api/conversation', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          image: imageDataUrl,
+          userMessage: userMessage
+        }),
+      }).then(response => {
+        if (!response.ok) {
+          throw new Error('Network response was not ok');
+        }
+        return response.body;
+      }).then(body => {
+        if (!body) {
+          throw new Error('No response body');
+        }
+
+        const reader = body.getReader();
+        const decoder = new TextDecoder();
+
+        const readStream = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              
+              if (done) break;
+              
+              const chunk = decoder.decode(value);
+              const lines = chunk.split('\n');
+              
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  try {
+                    const data = JSON.parse(line.slice(6));
+                    
+                    if (data.type === 'start') {
+                      // Conversation started
+                      await speakWithSettings('Processing your message...');
+                    } else if (data.type === 'chunk') {
+                      fullText = data.fullText;
+                      
+                      // Start speaking after we have a meaningful chunk (≥20 chars for conversations)
+                      if (!hasStartedSpeaking && fullText.length >= 20) {
+                        hasStartedSpeaking = true;
+                        // Start speaking the AI response
+                        speakWithSettings(fullText);
+                      }
+                      
+                    } else if (data.type === 'complete') {
+                      // Conversation complete
+                      
+                      // If we haven't started speaking yet, speak the full response
+                      if (!hasStartedSpeaking) {
+                        await speakWithSettings(data.response);
+                      }
+                      
+                      resolve({
+                        response: data.response,
+                        userMessage: data.userMessage
+                      });
+                      return;
+                    } else if (data.type === 'error') {
+                      setError(data.error);
+                      await speakWithSettings(data.error);
+                      reject(new Error(data.error));
+                      return;
+                    }
+                  } catch (parseError) {
+                    console.error('Error parsing conversation SSE data:', parseError);
+                  }
+                }
+              }
+            }
+          } catch (error) {
+            console.error('Error reading conversation stream:', error);
+            reject(error);
+          }
+        };
+
+        readStream();
+      }).catch(error => {
+        console.error('Conversation streaming error:', error);
+        reject(error);
+      });
+    });
+  }, [speakWithSettings]);
+
+  // Narration mode capture with detailed analysis (streaming)
   const handleNarrationCapture = useCallback(async () => {
     if (isLoading || !isCameraReady) return;
 
@@ -95,45 +327,14 @@ export default function CameraView() {
       setError(null);
       setFocusTimer(0);
 
-      await speakWithSettings('Analyzing object for detailed information...');
-
       const imageDataUrl = await captureImage();
       if (!imageDataUrl) return;
 
-      // Call API for detailed narration
-      const response = await fetch('/api/describe', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image: imageDataUrl,
-          mode: 'narration' // Will be used for detailed analysis
-        }),
-      });
+      // Use streaming analysis for faster response
+      const newDescription = await streamAnalysis(imageDataUrl, 'narration');
 
-      if (!response.ok) {
-        const errorData: ApiErrorResponse = await response.json();
-        setError(errorData.error);
-        await speakWithSettings(errorData.error);
-        return;
-      }
-
-      const data: { description: string; mode: string } = await response.json();
-
-      // Create new description object
-      const newDescription: Description = {
-        text: data.description,
-        timestamp: new Date(),
-        mode: 'narration'
-      };
-
-      // Update current description and add to history
-      setCurrentDescription(newDescription);
+      // Update description history
       setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
-
-      // Speak the detailed description
-      await speakWithSettings(data.description);
 
       setRetryCount(0);
 
@@ -145,9 +346,9 @@ export default function CameraView() {
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, isCameraReady, speakWithSettings, captureImage]);
+  }, [isLoading, isCameraReady, captureImage, streamAnalysis]);
 
-  // Guidance mode update with navigation hints
+  // Guidance mode update with navigation hints (streaming)
   const handleGuidanceUpdate = useCallback(async () => {
     if (isLoading || !isCameraReady) return;
 
@@ -157,47 +358,18 @@ export default function CameraView() {
       const imageDataUrl = await captureImage();
       if (!imageDataUrl) return;
 
-      // Call API for guidance
-      const response = await fetch('/api/describe', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image: imageDataUrl,
-          mode: 'guidance' // Will be used for navigation guidance
-        }),
-      });
+      // Use streaming analysis for faster guidance updates
+      const newDescription = await streamAnalysis(imageDataUrl, 'guidance');
 
-      if (!response.ok) {
-        const errorData: ApiErrorResponse = await response.json();
-        setError(errorData.error);
-        await speakWithSettings(errorData.error);
-        return;
-      }
-
-      const data: { description: string; mode: string } = await response.json();
-
-      // Create new description object
-      const newDescription: Description = {
-        text: data.description,
-        timestamp: new Date(),
-        mode: 'guidance'
-      };
-
-      // Update current description and add to history
-      setCurrentDescription(newDescription);
+      // Update description history
       setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
-
-      // Speak the guidance
-      await speakWithSettings(data.description);
 
     } catch (err) {
       console.error('Guidance update error:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, isCameraReady, captureImage, speakWithSettings]);
+  }, [isLoading, isCameraReady, captureImage, streamAnalysis]);
 
   // Guidance mode periodic updates
   const startGuidanceMode = useCallback(() => {
@@ -327,35 +499,16 @@ export default function CameraView() {
       // Too short, treat as regular tap
       startFocusTimer();
     } else {
-      // Process AI conversation
+      // Process AI conversation (streaming)
       if (recordedTranscript.trim()) {
         try {
           setIsLoading(true);
-          await speakWithSettings('Processing your message...');
 
           const imageDataUrl = await captureImage();
           if (!imageDataUrl) return;
 
-          // Call conversation API
-          const response = await fetch('/api/conversation', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              image: imageDataUrl,
-              userMessage: recordedTranscript.trim()
-            }),
-          });
-
-          if (!response.ok) {
-            const errorData: ApiErrorResponse = await response.json();
-            setError(errorData.error);
-            await speakWithSettings(errorData.error);
-            return;
-          }
-
-          const data: { response: string; userMessage: string } = await response.json();
+          // Use streaming conversation for faster response
+          const data = await streamConversation(imageDataUrl, recordedTranscript.trim());
 
           // Create conversation description for history
           const conversationDescription: Description = {
@@ -367,9 +520,6 @@ export default function CameraView() {
           // Update history
           setDescriptionHistory(prev => [conversationDescription, ...prev.slice(0, 4)]);
           setCurrentDescription(conversationDescription);
-
-          // Speak the AI response
-          await speakWithSettings(data.response);
 
         } catch (err) {
           console.error('Conversation error:', err);
@@ -383,7 +533,7 @@ export default function CameraView() {
         await handleNarrationCapture();
       }
     }
-  }, [isHoldingToTalk, speechRecognition, isRecording, recordedTranscript, startFocusTimer, speakWithSettings, captureImage, handleNarrationCapture]);
+  }, [isHoldingToTalk, speechRecognition, isRecording, recordedTranscript, startFocusTimer, speakWithSettings, captureImage, handleNarrationCapture, streamConversation]);
 
   // Camera activation on component mount
   useEffect(() => {
