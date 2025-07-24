@@ -1,12 +1,4 @@
 {
-  "buildCommand": "pnpm build",
-  "outputDirectory": ".next",
-  "framework": "nextjs",
-  "functions": {
-    "src/app/api/*/route.ts": {
-      "maxDuration": 30
-    }
-  },
   "headers": [
     {
       "source": "/sw.js",
@@ -22,7 +14,7 @@
       ]
     },
     {
-      "source": "/workbox-*.js",
+      "source": "/workbox-:path*.js",
       "headers": [
         {
           "key": "Cache-Control",
@@ -38,12 +30,6 @@
           "value": "application/manifest+json"
         }
       ]
-    }
-  ],
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/$1"
     }
   ]
 }

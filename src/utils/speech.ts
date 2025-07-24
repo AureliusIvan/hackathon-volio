@@ -261,4 +261,36 @@ export class SpeechRecognition {
 // Utility function to create a speech recognition instance
 export function createSpeechRecognition(): SpeechRecognition {
   return new SpeechRecognition();
+}
+
+// Function to play a short ring sound for recording feedback
+export function playRingSound(type: 'start' | 'end' = 'start'): void {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    
+    // Create oscillator for the ring sound
+    const oscillator = audioContext.createOscillator();
+    const gainNode = audioContext.createGain();
+    
+    // Connect nodes
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    // Configure the ring sound
+    oscillator.frequency.value = type === 'start' ? 800 : 600; // Higher pitch for start, lower for end
+    oscillator.type = 'sine';
+    
+    // Set volume envelope for a pleasant ring
+    gainNode.gain.setValueAtTime(0, audioContext.currentTime);
+    gainNode.gain.linearRampToValueAtTime(0.3, audioContext.currentTime + 0.05);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+    
+    // Play the sound
+    oscillator.start(audioContext.currentTime);
+    oscillator.stop(audioContext.currentTime + 0.3);
+    
+  } catch (error) {
+    console.error('Failed to play ring sound:', error);
+    // Silent fallback - no sound if Web Audio API fails
+  }
 } 

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { speak, isGeminiTTSAvailable, createSpeechRecognition, SpeechRecognition } from '../utils/speech';
+import { speak, isGeminiTTSAvailable, createSpeechRecognition, SpeechRecognition, playRingSound } from '../utils/speech';
 
 interface ApiErrorResponse {
   error: string;
@@ -467,12 +467,12 @@ export default function CameraView() {
       
       if (started) {
         setIsRecording(true);
-        speakWithSettings('Listening... Release when done speaking.');
+        playRingSound('start'); // Play ring sound instead of TTS
       } else {
         speakWithSettings('Sorry, speech recognition is not available. Please check your microphone permissions.');
       }
     } else {
-      speakWithSettings('Hold to talk to AI. Release when done.');
+      playRingSound('start'); // Play ring sound for non-speech recognition mode
     }
   }, [currentMode, isLoading, speechRecognition, speakWithSettings]);
 
@@ -492,6 +492,9 @@ export default function CameraView() {
       clearInterval(holdTimerRef.current);
       holdTimerRef.current = null;
     }
+
+    // Play ring sound to indicate recording has ended
+    playRingSound('end');
 
     const holdDuration = (Date.now() - holdStartTimeRef.current) / 1000;
 
