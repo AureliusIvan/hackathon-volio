@@ -489,7 +489,7 @@ export default function CameraView() {
           if (currentMode === 'guidance') {
             scheduleNextGuidanceUpdate();
           }
-                  }, 3000); // Wait 3 seconds before next update
+                  }, 2500); // Wait 5 seconds before next update
       };
 
       // Start the first update

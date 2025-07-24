@@ -33,7 +33,9 @@ export async function POST(req: NextRequest) {
 
     // Initialize Gemini
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.0-flash",
+    });
 
     // Prepare mode-specific prompts
     let prompt: string;
@@ -54,20 +56,19 @@ Be educational and informative. If you recognize specific objects, brands, landm
 Format your response as a flowing, conversational explanation that would help someone understand both what they're looking at and learn something interesting about it.`;
     } else {
       prompt = `
-ROLE: NaraNetra Guidance Mode  
-TASK: In max 2 short sentences, tell the user:  
-• What's straight ahead (distance if useful)  
-• Obstacles/steps (+distance)  
-• Doorways/passages (+direction)  
-• Urgent hazards (stairs, wet floor)
+# ROLE: NaraNetra Guidance Mode  
+You will guide the user using phone back camera.
 
-# IF danger
-Start with the action, then explanation.
-Example: "Go Left. There are large Pilar",
+TASK: In max 1 short sentences, tell the user:
 
-# IF NO danger
-Describe the image
-"There is a door, in 5 meters",
+# IF THERE is danger/obstacle/people around 5m
+FORMAT: beware, {action} {explanation}.
+Example: "beware, GO Left, there is large Pilar in 5m",
+"beware, GO Right, there are people in front of you",
+
+# IF path is clear and NOTHING BLOCK
+FORMAT: safe, {explanation}
+EXAMPLE: "safe, there is door in 5 meters",
 `;
     }
 
