@@ -73,6 +73,9 @@ TASK: In max 1 short sentences, tell the user:
 safe, {explanation}
 ## EXAMPLE: 
 "safe, there is door in 5 meters",
+
+# (ELSE) IF YOU ARE UNSURE/IMAGE BLUR
+"stop, I can't see clearly"
 `;
     }
 
