@@ -533,11 +533,12 @@ export default function CameraView() {
     if (speechRecognition && speechRecognition.isSupported()) {
       const started = speechRecognition.startRecording(
         (transcript) => {
+          console.log('Speech recognition transcript update:', transcript);
           setRecordedTranscript(transcript);
         },
         (error) => {
           console.error('Speech recognition error:', error);
-          speakWithSettings('Sorry, I had trouble hearing you. Please try again.');
+          speakWithSettings(`Sorry, I had trouble hearing you: ${error}. Please try again.`);
         }
       );
       
@@ -545,9 +546,10 @@ export default function CameraView() {
         setIsRecording(true);
         playRingSound('start'); // Play ring sound instead of TTS
       } else {
-        speakWithSettings('Sorry, speech recognition is not available. Please check your microphone permissions.');
+        speakWithSettings('Sorry, speech recognition could not start. Please check your microphone permissions.');
       }
     } else {
+      console.log('Speech recognition not supported, using hold-to-talk without speech recognition');
       playRingSound('start'); // Play ring sound for non-speech recognition mode
     }
   }, [currentMode, isLoading, speechRecognition, speakWithSettings]);
@@ -558,10 +560,27 @@ export default function CameraView() {
     setIsHoldingToTalk(false);
     setHoldTimer(0);
 
-    // Stop speech recognition
+    // Get the final transcript from speech recognition
+    let finalTranscript = recordedTranscript;
+    
+    // Stop speech recognition and wait for it to finish processing
     if (speechRecognition && isRecording) {
-      speechRecognition.stopRecording();
       setIsRecording(false);
+      
+      // Wait for speech recognition to completely finish and get final transcript
+      const speechTranscript = await speechRecognition.stopRecording();
+      
+      console.log('Speech recognition debug:', {
+        recordedTranscript: recordedTranscript,
+        speechTranscript: speechTranscript,
+        holdDuration: (Date.now() - holdStartTimeRef.current) / 1000
+      });
+      
+      // Use the transcript from stopRecording as it's the most complete
+      if (speechTranscript && speechTranscript.trim()) {
+        finalTranscript = speechTranscript.trim();
+        setRecordedTranscript(speechTranscript);
+      }
     }
 
     if (holdTimerRef.current) {
@@ -579,7 +598,7 @@ export default function CameraView() {
       startFocusTimer();
     } else {
       // Process AI conversation (streaming)
-      if (recordedTranscript.trim()) {
+      if (finalTranscript.trim()) {
         try {
           setIsLoading(true);
 
@@ -587,7 +606,7 @@ export default function CameraView() {
           if (!imageDataUrl) return;
 
           // Use streaming conversation for faster response
-          const data = await streamConversation(imageDataUrl, recordedTranscript.trim());
+          const data = await streamConversation(imageDataUrl, finalTranscript.trim());
 
           // Create conversation description for history
           const conversationDescription: Description = {
@@ -607,9 +626,12 @@ export default function CameraView() {
           setIsLoading(false);
         }
       } else {
-        // No speech detected, fall back to regular narration
-        await speakWithSettings('I didn\'t hear anything. Let me describe what I see instead.');
-        await handleNarrationCapture();
+        // No speech detected, just acknowledge without fallback analysis
+        const noSpeechMessage = speechRecognition && speechRecognition.isSupported() 
+          ? 'I didn\'t hear anything. Please try again.'
+          : 'Speech recognition is not available on this device.';
+        
+        await speakWithSettings(noSpeechMessage);
       }
     }
   }, [isHoldingToTalk, speechRecognition, isRecording, recordedTranscript, startFocusTimer, speakWithSettings, captureImage, handleNarrationCapture, streamConversation]);

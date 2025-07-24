@@ -182,6 +182,8 @@ export class SpeechRecognition {
   private isRecording = false;
   private onResultCallback: ((transcript: string) => void) | null = null;
   private onErrorCallback: ((error: string) => void) | null = null;
+  private currentTranscript = '';
+  private stopPromiseResolve: ((transcript: string) => void) | null = null;
 
   constructor() {
     // Check for browser support
@@ -195,16 +197,27 @@ export class SpeechRecognition {
       
       this.recognition.onresult = (event: any) => {
         let finalTranscript = '';
+        let interimTranscript = '';
         
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcript = event.results[i][0].transcript;
           if (event.results[i].isFinal) {
             finalTranscript += transcript;
+          } else {
+            interimTranscript += transcript;
           }
         }
         
-        if (finalTranscript && this.onResultCallback) {
-          this.onResultCallback(finalTranscript.trim());
+        // Update current transcript with final results, or use interim if no final
+        if (finalTranscript) {
+          this.currentTranscript = finalTranscript.trim();
+        } else if (interimTranscript) {
+          this.currentTranscript = interimTranscript.trim();
+        }
+        
+        // Always call callback with the current transcript
+        if (this.currentTranscript && this.onResultCallback) {
+          this.onResultCallback(this.currentTranscript);
         }
       };
       
@@ -217,6 +230,11 @@ export class SpeechRecognition {
       
       this.recognition.onend = () => {
         this.isRecording = false;
+        // Resolve any pending stop promise with the final transcript
+        if (this.stopPromiseResolve) {
+          this.stopPromiseResolve(this.currentTranscript);
+          this.stopPromiseResolve = null;
+        }
       };
     }
   }
@@ -233,6 +251,8 @@ export class SpeechRecognition {
       return false;
     }
 
+    // Reset transcript for new recording session
+    this.currentTranscript = '';
     this.onResultCallback = onResult;
     this.onErrorCallback = onError;
     
@@ -246,15 +266,36 @@ export class SpeechRecognition {
     }
   }
 
-  public stopRecording(): void {
-    if (this.recognition && this.isRecording) {
+  public stopRecording(): Promise<string> {
+    return new Promise((resolve) => {
+      if (!this.recognition || !this.isRecording) {
+        resolve(this.currentTranscript);
+        return;
+      }
+
+      // Set up the promise resolver
+      this.stopPromiseResolve = resolve;
+      
+      // Stop the recognition - this will trigger onend which resolves the promise
       this.recognition.stop();
       this.isRecording = false;
-    }
+      
+      // Fallback timeout in case onend doesn't fire
+      setTimeout(() => {
+        if (this.stopPromiseResolve) {
+          this.stopPromiseResolve(this.currentTranscript);
+          this.stopPromiseResolve = null;
+        }
+      }, 500);
+    });
   }
 
   public getRecordingState(): boolean {
     return this.isRecording;
+  }
+
+  public getCurrentTranscript(): string {
+    return this.currentTranscript;
   }
 }
 
