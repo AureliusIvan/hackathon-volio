@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { speak, isGeminiTTSAvailable, createSpeechRecognition, SpeechRecognition, playRingSound } from '../utils/speech';
+import { speak, isGeminiTTSAvailable, playRingSound } from '../utils/speech';
 import { generateImageHash, areImagesSimilar } from '../utils/imageHash';
 
 interface Description {
@@ -34,17 +34,13 @@ export default function CameraView() {
   // New mode system states
   const [currentMode, setCurrentMode] = useState<AppMode>('narration');
   const [focusTimer, setFocusTimer] = useState<number>(0);
-  const [isHoldingToTalk, setIsHoldingToTalk] = useState<boolean>(false);
-  const [holdTimer, setHoldTimer] = useState<number>(0);
+  // Removed hold-to-talk functionality for narration mode
   
   // Guidance mode health tracking
   const [lastGuidanceUpdate, setLastGuidanceUpdate] = useState<Date | null>(null);
   const [guidanceRetryCount, setGuidanceRetryCount] = useState<number>(0);
   
-  // Speech recognition states
-  const [speechRecognition, setSpeechRecognition] = useState<SpeechRecognition | null>(null);
-  const [isRecording, setIsRecording] = useState<boolean>(false);
-  const [recordedTranscript, setRecordedTranscript] = useState<string>('');
+  // Speech recognition removed for narration mode
 
   // Image similarity and caching states
   const [lastImageHash, setLastImageHash] = useState<string>('');
@@ -56,8 +52,7 @@ export default function CameraView() {
   const focusTimerRef = useRef<NodeJS.Timeout | null>(null);
   const guidanceTimerRef = useRef<NodeJS.Timeout | null>(null);
   const guidanceHealthCheckRef = useRef<NodeJS.Timeout | null>(null);
-  const holdTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const holdStartTimeRef = useRef<number>(0);
+  // Removed hold-to-talk timer refs
   const tapStartTimeRef = useRef<number>(0);
 
   // Memoized speech function to avoid dependency warnings
@@ -124,10 +119,8 @@ export default function CameraView() {
     singleTap: boolean = false
   ): Promise<Description> => {
     return new Promise((resolve, reject) => {
-      const eventSource = new EventSource('/api/describe');
       let fullText = '';
       let hasStartedSpeaking = false;
-      let firstChunk = '';
       let currentDescription: Description | null = null;
 
       // Send the request data via POST (we'll modify this approach)
@@ -239,114 +232,9 @@ export default function CameraView() {
     });
   }, [speakWithSettings]);
 
-  // Helper function for streaming conversation
-  const streamConversation = useCallback(async (
-    imageDataUrl: string, 
-    userMessage: string
-  ): Promise<{response: string; userMessage: string}> => {
-    return new Promise((resolve, reject) => {
-      let fullText = '';
-      let hasStartedSpeaking = false;
+  // Conversation functionality removed for narration mode
 
-      fetch('/api/conversation', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          image: imageDataUrl,
-          userMessage: userMessage
-        }),
-      }).then(response => {
-        if (!response.ok) {
-          throw new Error('Network response was not ok');
-        }
-        return response.body;
-      }).then(body => {
-        if (!body) {
-          throw new Error('No response body');
-        }
-
-        const reader = body.getReader();
-        const decoder = new TextDecoder();
-
-        const readStream = async () => {
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              
-              if (done) break;
-              
-              const chunk = decoder.decode(value);
-              const lines = chunk.split('\n');
-              
-              for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                  try {
-                    const data = JSON.parse(line.slice(6));
-                    
-                    if (data.type === 'start') {
-                      // Conversation started
-                      await speakWithSettings('Processing your message...');
-                    } else if (data.type === 'chunk') {
-                      fullText = data.fullText;
-                      
-                      // Start speaking after we have a meaningful chunk (≥20 chars for conversations)
-                      if (!hasStartedSpeaking && fullText.length >= 20) {
-                        hasStartedSpeaking = true;
-                        // Start speaking the AI response
-                        speakWithSettings(fullText);
-                      }
-                      
-                    } else if (data.type === 'web_search_start') {
-                      // Web search started for conversation
-                      setIsWebSearching(true);
-                      console.log('Conversation web search started:', data.message);
-                    } else if (data.type === 'web_search_results') {
-                      // Web search results for conversation
-                      setIsWebSearching(false);
-                      setHasWebResults(true);
-                      console.log('Conversation web search results:', data);
-                    } else if (data.type === 'complete') {
-                      // Conversation complete
-                      
-                      // If we haven't started speaking yet, speak the full response
-                      if (!hasStartedSpeaking) {
-                        await speakWithSettings(data.response);
-                      }
-                      
-                      resolve({
-                        response: data.response,
-                        userMessage: data.userMessage
-                      });
-                      return;
-                    } else if (data.type === 'error') {
-                      setError(data.error);
-                      await speakWithSettings(data.error);
-                      reject(new Error(data.error));
-                      return;
-                    }
-                  } catch (parseError) {
-                    console.error('Error parsing conversation SSE data:', parseError);
-                  }
-                }
-              }
-            }
-          } catch (error) {
-            console.error('Error reading conversation stream:', error);
-            reject(error);
-          }
-        };
-
-        readStream();
-      }).catch(error => {
-        console.error('Conversation streaming error:', error);
-        reject(error);
-      });
-    });
-  }, [speakWithSettings]);
-
-  // Single tap object detection (silent)
+  // Enhanced single tap object detection (immediate response)
   const handleSingleTapDetection = useCallback(async (): Promise<void> => {
     if (isLoading || !isCameraReady) return;
 
@@ -355,6 +243,9 @@ export default function CameraView() {
       setError(null);
       setIsWebSearching(false);
       setHasWebResults(false);
+
+      // Immediate feedback
+      playRingSound('start');
 
       const imageDataUrl = await captureImage();
       if (!imageDataUrl) return;
@@ -366,7 +257,7 @@ export default function CameraView() {
         setCurrentDescription(newDescription);
         setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
         
-        // Optional: Brief audio feedback for single tap completion
+        // Success feedback
         playRingSound('end');
       }
 
@@ -374,7 +265,7 @@ export default function CameraView() {
       console.error('Single tap detection error:', err);
       const errorMessage = 'Object detection failed. Please try again.';
       setError(errorMessage);
-      // Brief error sound instead of voice
+      // Error feedback
       playRingSound('start');
     } finally {
       setIsLoading(false);
@@ -520,7 +411,7 @@ export default function CameraView() {
 
     // Announce mode switch
     if (newMode === 'narration') {
-      await speakWithSettings('Narration Mode is on now. Tap for details, hold to talk with AI.');
+      await speakWithSettings('Narration Mode is on now. Tap for object detection.');
       setFocusTimer(0);
     } else {
       await speakWithSettings('Guidance Mode is on now. Navigation assistance every 4 seconds.');
@@ -599,161 +490,9 @@ export default function CameraView() {
     }
   }, [currentMode, isCameraReady]); // Depend on currentMode and camera readiness
 
-  // Auto-capture for narration mode
-  const startFocusTimer = useCallback(() => {
-    if (currentMode !== 'narration' || isLoading || isHoldingToTalk) return;
+  // Auto-capture functionality removed for simplified tap-only narration mode
 
-    setFocusTimer(2);
-
-    focusTimerRef.current = setTimeout(async () => {
-      if (currentMode === 'narration') {
-        await handleNarrationCapture();
-      }
-    }, 2000);
-
-    // Update countdown every 100ms
-    const countdown = setInterval(() => {
-      setFocusTimer(prev => {
-        const newTime = prev - 0.1;
-        if (newTime <= 0) {
-          clearInterval(countdown);
-          return 0;
-        }
-        return newTime;
-      });
-    }, 100);
-  }, [currentMode, isLoading, isHoldingToTalk, handleNarrationCapture]);
-
-  // Hold-to-talk functionality
-  const startHoldToTalk = useCallback(() => {
-    if (currentMode !== 'narration' || isLoading) return;
-
-    setIsHoldingToTalk(true);
-    setHoldTimer(0);
-    setRecordedTranscript('');
-    holdStartTimeRef.current = Date.now();
-
-    // Clear any existing focus timer
-    if (focusTimerRef.current) {
-      clearTimeout(focusTimerRef.current);
-      focusTimerRef.current = null;
-      setFocusTimer(0);
-    }
-
-    // Update hold timer display
-    holdTimerRef.current = setInterval(() => {
-      const elapsed = (Date.now() - holdStartTimeRef.current) / 1000;
-      setHoldTimer(elapsed);
-    }, 100);
-
-    // Start speech recognition if available
-    if (speechRecognition && speechRecognition.isSupported()) {
-      const started = speechRecognition.startRecording(
-        (transcript) => {
-          console.log('Speech recognition transcript update:', transcript);
-          setRecordedTranscript(transcript);
-        },
-        (error) => {
-          console.error('Speech recognition error:', error);
-          speakWithSettings(`Sorry, I had trouble hearing you: ${error}. Please try again.`);
-        }
-      );
-      
-      if (started) {
-        setIsRecording(true);
-        playRingSound('start'); // Play ring sound instead of TTS
-      } else {
-        speakWithSettings('Sorry, speech recognition could not start. Please check your microphone permissions.');
-      }
-    } else {
-      console.log('Speech recognition not supported, using hold-to-talk without speech recognition');
-      playRingSound('start'); // Play ring sound for non-speech recognition mode
-    }
-  }, [currentMode, isLoading, speechRecognition, speakWithSettings]);
-
-  const endHoldToTalk = useCallback(async () => {
-    if (!isHoldingToTalk) return;
-
-    setIsHoldingToTalk(false);
-    setHoldTimer(0);
-
-    // Get the final transcript from speech recognition
-    let finalTranscript = recordedTranscript;
-    
-    // Stop speech recognition and wait for it to finish processing
-    if (speechRecognition && isRecording) {
-      setIsRecording(false);
-      
-      // Wait for speech recognition to completely finish and get final transcript
-      const speechTranscript = await speechRecognition.stopRecording();
-      
-      console.log('Speech recognition debug:', {
-        recordedTranscript: recordedTranscript,
-        speechTranscript: speechTranscript,
-        holdDuration: (Date.now() - holdStartTimeRef.current) / 1000
-      });
-      
-      // Use the transcript from stopRecording as it's the most complete
-      if (speechTranscript && speechTranscript.trim()) {
-        finalTranscript = speechTranscript.trim();
-        setRecordedTranscript(speechTranscript);
-      }
-    }
-
-    if (holdTimerRef.current) {
-      clearInterval(holdTimerRef.current);
-      holdTimerRef.current = null;
-    }
-
-    // Play ring sound to indicate recording has ended
-    playRingSound('end');
-
-    const holdDuration = (Date.now() - holdStartTimeRef.current) / 1000;
-
-    if (holdDuration < 0.5) {
-      // Too short, treat as regular tap
-      startFocusTimer();
-    } else {
-      // Process AI conversation (streaming)
-      if (finalTranscript.trim()) {
-        try {
-          setIsLoading(true);
-          setIsWebSearching(false);
-          setHasWebResults(false);
-
-          const imageDataUrl = await captureImage();
-          if (!imageDataUrl) return;
-
-          // Use streaming conversation for faster response
-          const data = await streamConversation(imageDataUrl, finalTranscript.trim());
-
-          // Create conversation description for history
-          const conversationDescription: Description = {
-            text: `You said: "${data.userMessage}" | AI replied: "${data.response}"`,
-            timestamp: new Date(),
-            mode: 'narration'
-          };
-
-          // Update history
-          setDescriptionHistory(prev => [conversationDescription, ...prev.slice(0, 4)]);
-          setCurrentDescription(conversationDescription);
-
-        } catch (err) {
-          console.error('Conversation error:', err);
-          await speakWithSettings('Sorry, I had trouble processing your message. Please try again.');
-        } finally {
-          setIsLoading(false);
-        }
-      } else {
-        // No speech detected, just acknowledge without fallback analysis
-        const noSpeechMessage = speechRecognition && speechRecognition.isSupported() 
-          ? 'I didn\'t hear anything. Please try again.'
-          : 'Speech recognition is not available on this device.';
-        
-        await speakWithSettings(noSpeechMessage);
-      }
-    }
-  }, [isHoldingToTalk, speechRecognition, isRecording, recordedTranscript, startFocusTimer, speakWithSettings, captureImage, handleNarrationCapture, streamConversation]);
+  // Hold-to-talk functionality removed for narration mode
 
   // Camera activation on component mount
   useEffect(() => {
@@ -772,7 +511,7 @@ export default function CameraView() {
           video.srcObject = stream;
           video.onloadedmetadata = async () => {
             setIsCameraReady(true);
-            await speakWithSettings('Camera ready. Narration Mode is on now. Short tap top for silent object detection, hold top to talk with AI. Tap bottom for navigation guidance.');
+            await speakWithSettings('Camera ready. Narration Mode is on now. Tap top for object detection. Tap bottom for navigation guidance.');
           };
         }
       } catch (err) {
@@ -793,18 +532,8 @@ export default function CameraView() {
       }
     };
 
-    // Initialize speech recognition
-    const initializeSpeechRecognition = () => {
-      const recognition = createSpeechRecognition();
-      setSpeechRecognition(recognition);
-      if (!recognition.isSupported()) {
-        console.warn('Speech recognition not supported in this browser');
-      }
-    };
-
     initializeCamera();
     checkTTSAvailability();
-    initializeSpeechRecognition();
 
     // Cleanup function with proper ref handling
     return () => {
@@ -818,7 +547,6 @@ export default function CameraView() {
       if (focusTimerRef.current) clearTimeout(focusTimerRef.current);
       if (guidanceTimerRef.current) clearInterval(guidanceTimerRef.current);
       if (guidanceHealthCheckRef.current) clearInterval(guidanceHealthCheckRef.current);
-      if (holdTimerRef.current) clearInterval(holdTimerRef.current);
     };
   }, [speakWithSettings]); // Only depend on speakWithSettings
 
@@ -844,19 +572,13 @@ export default function CameraView() {
       await switchMode('narration');
     } else if (!isTopHalf && currentMode !== 'guidance') {
       await switchMode('guidance');
-    } else if (isTopHalf && currentMode === 'narration') {
-      // Start hold timer for narration mode
-      startHoldToTalk();
     }
+    // Removed hold-to-talk for narration mode - now only supports tap
   };
 
   const handleMouseUp = async (event: React.MouseEvent) => {
-    const tapDuration = Date.now() - tapStartTimeRef.current;
-    
-    if (isHoldingToTalk && currentMode === 'narration') {
-      await endHoldToTalk();
-    } else if (currentMode === 'narration' && tapDuration < 300) {
-      // Short tap detected - trigger single tap object detection
+    if (currentMode === 'narration') {
+      // Any tap in narration mode triggers single tap object detection
       const rect = event.currentTarget.getBoundingClientRect();
       const clickY = event.clientY - rect.top;
       const screenHeight = rect.height;
@@ -882,18 +604,13 @@ export default function CameraView() {
       await switchMode('narration');
     } else if (!isTopHalf && currentMode !== 'guidance') {
       await switchMode('guidance');
-    } else if (isTopHalf && currentMode === 'narration') {
-      startHoldToTalk();
     }
+    // Removed hold-to-talk for narration mode - now only supports tap
   };
 
   const handleTouchEnd = async (event: React.TouchEvent) => {
-    const tapDuration = Date.now() - tapStartTimeRef.current;
-    
-    if (isHoldingToTalk && currentMode === 'narration') {
-      await endHoldToTalk();
-    } else if (currentMode === 'narration' && tapDuration < 300) {
-      // Short tap detected - trigger single tap object detection
+    if (currentMode === 'narration') {
+      // Any tap in narration mode triggers single tap object detection
       const rect = event.currentTarget.getBoundingClientRect();
       const touch = event.changedTouches[0];
       const touchY = touch.clientY - rect.top;
@@ -925,12 +642,12 @@ export default function CameraView() {
       onTouchEnd={handleTouchEnd}
       role="button"
       tabIndex={0}
-      aria-label="Short tap top for object detection, hold top to talk to AI. Tap bottom for guidance mode."
+      aria-label="Tap top for object detection. Tap bottom for guidance mode."
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           if (currentMode === 'narration') {
-            startFocusTimer();
+            handleSingleTapDetection();
           }
         }
       }}
@@ -965,17 +682,9 @@ export default function CameraView() {
             <div className={`text-center p-2 rounded-lg ${currentMode === 'narration' ? 'bg-blue-600' : 'bg-blue-400'
               } bg-opacity-80 text-white`}>
               <h3 className="text-sm font-semibold">📖 NARRATION MODE</h3>
-              <p className="text-xs">Short tap for object detection • Hold to talk to AI</p>
+              <p className="text-xs">Tap for instant object detection</p>
               {currentMode === 'narration' && focusTimer > 0 && (
                 <p className="text-xs mt-1">Capturing in {focusTimer.toFixed(1)}s...</p>
-              )}
-              {isHoldingToTalk && (
-                <div className="text-xs mt-1 text-yellow-300">
-                  <p>🎤 {isRecording ? 'Recording' : 'Holding to talk'} ({holdTimer.toFixed(1)}s)</p>
-                  {isRecording && recordedTranscript && (
-                    <p className="text-xs mt-1 text-green-300">"{recordedTranscript}"</p>
-                  )}
-                </div>
               )}
             </div>
           </div>
