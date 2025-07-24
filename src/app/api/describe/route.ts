@@ -53,16 +53,15 @@ Format your response as a flowing, conversational explanation that would help so
     } else {
       prompt = `You are NaraNetra, an assistant for the visually impaired. You are in GUIDANCE MODE.
 
-Analyze this image for navigation and spatial awareness. Provide a brief, practical description that includes:
-1. What's directly ahead or in the path
-2. Any obstacles, steps, or changes in terrain
-3. Doorways, passages, or directional guidance
-4. Safety considerations (wet floors, stairs, etc.)
-5. Orientation hints (walls, corners, open spaces)
+Analyze this image for navigation. Provide a SHORT, practical description:
+1. What's directly ahead in the path
+2. Any obstacles or steps
+3. Doorways or passages
+4. Safety warnings (stairs, wet floors)
 
-Keep your response SHORT and focused on immediate navigation needs. Be direct and actionable for someone moving through this space.
+Be direct and actionable. Maximum 2-3 sentences.
 
-Example format: "Clear path ahead with a doorway on the right. Steps begin in 3 feet. Wall continues on your left."`;
+Example: "Clear path ahead. Doorway on right. Steps in 3 feet."`;
     }
     
     // Strip the data URL prefix if present

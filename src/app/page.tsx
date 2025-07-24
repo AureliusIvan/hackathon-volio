@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { speak, isGeminiTTSAvailable, createSpeechRecognition, SpeechRecognition, playRingSound } from '../utils/speech';
+import { generateImageHash, areImagesSimilar } from '../utils/imageHash';
 
 interface ApiErrorResponse {
   error: string;
@@ -45,6 +46,11 @@ export default function CameraView() {
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordedTranscript, setRecordedTranscript] = useState<string>('');
 
+  // Image similarity and caching states
+  const [lastImageHash, setLastImageHash] = useState<string>('');
+  const [imageCache, setImageCache] = useState<Map<string, Description>>(new Map());
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const focusTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -61,6 +67,7 @@ export default function CameraView() {
     });
   }, [ttsSettings.useGeminiTTS, ttsSettings.voice, ttsSettings.speed]);
 
+
   // Helper function to capture image (optimized for speed)
   const captureImage = useCallback(async (): Promise<string | null> => {
     const canvas = canvasRef.current;
@@ -75,9 +82,9 @@ export default function CameraView() {
       throw new Error('Cannot get canvas context');
     }
 
-    // Optimize dimensions for faster processing (max 800x600)
-    const maxWidth = 800;
-    const maxHeight = 600;
+    // Optimize dimensions for faster processing (max 400x300)
+    const maxWidth = 400;
+    const maxHeight = 300;
     const videoWidth = video.videoWidth;
     const videoHeight = video.videoHeight;
     
@@ -105,7 +112,7 @@ export default function CameraView() {
     context.drawImage(video, 0, 0, targetWidth, targetHeight);
 
     // Convert to Base64 JPEG with optimized quality for speed
-    return canvas.toDataURL('image/jpeg', 0.7);
+    return canvas.toDataURL('image/jpeg', 0.5);
   }, []);
 
   // Helper function for streaming analysis
@@ -318,37 +325,97 @@ export default function CameraView() {
     });
   }, [speakWithSettings]);
 
-  // Narration mode capture with detailed analysis (streaming)
+  // Optimized analysis with similarity detection and caching
+  const optimizedAnalysis = useCallback(async (imageDataUrl: string, mode: 'narration' | 'guidance'): Promise<Description | null> => {
+    try {
+      // Generate image hash for similarity detection
+      const currentHash = await generateImageHash(imageDataUrl);
+      
+      // Check if image is similar to last analyzed image
+      if (lastImageHash && areImagesSimilar(currentHash, lastImageHash)) {
+        console.log('Similar image detected, skipping analysis');
+        return null;
+      }
+      
+      // Check cache for exact match
+      const cacheKey = `${currentHash}-${mode}`;
+      const cachedResult = imageCache.get(cacheKey);
+      if (cachedResult) {
+        console.log('Using cached analysis result');
+        setLastImageHash(currentHash);
+        return cachedResult;
+      }
+      
+      // Perform new analysis
+      const newDescription = await streamAnalysis(imageDataUrl, mode);
+      
+      // Update cache and hash
+      setImageCache(prev => {
+        const newCache = new Map(prev);
+        newCache.set(cacheKey, newDescription);
+        
+        // Limit cache size to 10 entries
+        if (newCache.size > 10) {
+          const firstKey = newCache.keys().next().value;
+          if (firstKey) {
+            newCache.delete(firstKey);
+          }
+        }
+        
+        return newCache;
+      });
+      
+      setLastImageHash(currentHash);
+      return newDescription;
+      
+    } catch (error) {
+      console.error('Optimized analysis error:', error);
+      // Fallback to regular analysis
+      return await streamAnalysis(imageDataUrl, mode);
+    }
+  }, [lastImageHash, imageCache, streamAnalysis]);
+
+  // Optimized narration mode capture with debouncing and similarity detection
   const handleNarrationCapture = useCallback(async () => {
     if (isLoading || !isCameraReady) return;
 
-    try {
-      setIsLoading(true);
-      setError(null);
-      setFocusTimer(0);
-
-      const imageDataUrl = await captureImage();
-      if (!imageDataUrl) return;
-
-      // Use streaming analysis for faster response
-      const newDescription = await streamAnalysis(imageDataUrl, 'narration');
-
-      // Update description history
-      setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
-
-      setRetryCount(0);
-
-    } catch (err) {
-      console.error('Narration capture error:', err);
-      const errorMessage = 'Sorry, an error occurred during analysis. Please try again.';
-      setError(errorMessage);
-      await speak(errorMessage, { forceWebTTS: true });
-    } finally {
-      setIsLoading(false);
+    // Clear existing debounce timer
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
     }
-  }, [isLoading, isCameraReady, captureImage, streamAnalysis]);
 
-  // Guidance mode update with navigation hints (streaming)
+    // Debounce the analysis by 500ms
+    debounceTimerRef.current = setTimeout(async () => {
+      try {
+        setIsLoading(true);
+        setError(null);
+        setFocusTimer(0);
+
+        const imageDataUrl = await captureImage();
+        if (!imageDataUrl) return;
+
+        // Use optimized analysis with similarity detection and caching
+        const newDescription = await optimizedAnalysis(imageDataUrl, 'narration');
+        
+        // Only update if we got a new description (not skipped due to similarity)
+        if (newDescription) {
+          setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
+        }
+
+        setRetryCount(0);
+
+      } catch (err) {
+        console.error('Narration capture error:', err);
+        const errorMessage = 'Sorry, an error occurred during analysis. Please try again.';
+        setError(errorMessage);
+        await speakWithSettings(errorMessage, { forceWebTTS: true });
+      } finally {
+        setIsLoading(false);
+      }
+    }, 500);
+  }, [isLoading, isCameraReady, captureImage, optimizedAnalysis, speakWithSettings]);
+
+  // Optimized guidance mode update with similarity detection
   const handleGuidanceUpdate = useCallback(async () => {
     if (isLoading || !isCameraReady) return;
 
@@ -358,18 +425,20 @@ export default function CameraView() {
       const imageDataUrl = await captureImage();
       if (!imageDataUrl) return;
 
-      // Use streaming analysis for faster guidance updates
-      const newDescription = await streamAnalysis(imageDataUrl, 'guidance');
+      // Use optimized analysis with similarity detection and caching
+      const newDescription = await optimizedAnalysis(imageDataUrl, 'guidance');
 
-      // Update description history
-      setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
+      // Only update if we got a new description (not skipped due to similarity)
+      if (newDescription) {
+        setDescriptionHistory(prev => [newDescription, ...prev.slice(0, 4)]);
+      }
 
     } catch (err) {
       console.error('Guidance update error:', err);
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, isCameraReady, captureImage, streamAnalysis]);
+  }, [isLoading, isCameraReady, captureImage, optimizedAnalysis]);
 
   // Guidance mode periodic updates
   const startGuidanceMode = useCallback(() => {
@@ -603,6 +672,15 @@ export default function CameraView() {
       if (holdTimerRef.current) clearInterval(holdTimerRef.current);
     };
   }, [speakWithSettings]); // Only depend on speakWithSettings
+
+  // Cleanup effect for debounce timer
+  useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+    };
+  }, []);
 
   // Handle screen area mouse/touch events
   const handleMouseDown = async (event: React.MouseEvent) => {
