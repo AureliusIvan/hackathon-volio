@@ -24,3 +24,24 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Scrolling text animation */
+@keyframes scroll-up {
+  0% {
+    transform: translateY(100%);
+  }
+  10% {
+    transform: translateY(0%);
+  }
+  90% {
+    transform: translateY(0%);
+  }
+  100% {
+    transform: translateY(-100%);
+  }
+}
+
+.animate-scroll-up {
+  animation: scroll-up 15s linear infinite;
+  animation-delay: 1s;
+}

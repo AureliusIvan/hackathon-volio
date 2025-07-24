@@ -879,11 +879,11 @@ export default function CameraView() {
       {/* Loading overlay */}
       {isLoading && <LoadingSpinner />}
 
-      {/* Current Description Display */}
+      {/* Current Description Display - Fixed Size Scrolling Container */}
       {currentDescription && !isLoading && (
-        <div className={`absolute top-1/2 left-4 right-4 transform -translate-y-1/2 ${currentDescription.mode === 'narration' ? 'bg-blue-900' : 'bg-green-900'
-          } bg-opacity-90 text-white p-4 rounded-lg border border-gray-600 z-40`}>
-          <div className="flex justify-between items-start mb-2">
+        <div className={`absolute bottom-20 left-4 right-4 h-32 ${currentDescription.mode === 'narration' ? 'bg-blue-900' : 'bg-green-900'
+          } bg-opacity-90 text-white rounded-lg border border-gray-600 z-40 flex flex-col`}>
+          <div className="flex justify-between items-start p-3 pb-2 border-b border-gray-600">
             <h3 className="text-sm font-semibold text-white">
               {currentDescription.mode === 'narration' ? '📖' : '🧭'} {currentDescription.mode.toUpperCase()}
               {ttsSettings.useGeminiTTS && geminiTTSAvailable && (
@@ -894,7 +894,7 @@ export default function CameraView() {
               )}
               {hasWebResults && !isWebSearching && (
                 <span className="text-xs bg-purple-600 px-2 py-1 rounded ml-2">🌐 Enhanced</span>
-              )}:
+              )}
             </h3>
             <div className="flex space-x-2">
               <button
@@ -910,7 +910,11 @@ export default function CameraView() {
               <span className="text-xs text-gray-300">{formatTime(currentDescription.timestamp)}</span>
             </div>
           </div>
-          <p className="text-lg font-medium leading-relaxed">{currentDescription.text}</p>
+          <div className="flex-1 overflow-hidden relative px-3 py-2">
+            <div className="animate-scroll-up text-base font-medium leading-relaxed whitespace-pre-wrap">
+              {currentDescription.text}
+            </div>
+          </div>
         </div>
       )}
 
