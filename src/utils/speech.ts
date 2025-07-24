@@ -6,13 +6,54 @@ interface TTSResponse {
   errorType?: string;
 }
 
+// Global speech state management
+let isSpeaking = false;
+let speechCallbacks: (() => void)[] = [];
+
+// Speech state management functions
+export function getIsSpeaking(): boolean {
+  return isSpeaking;
+}
+
+export function addSpeechEndCallback(callback: () => void): void {
+  speechCallbacks.push(callback);
+}
+
+export function clearSpeechEndCallbacks(): void {
+  speechCallbacks = [];
+}
+
+function setSpeechState(speaking: boolean): void {
+  console.log(`[Speech] State changed: ${speaking ? 'SPEAKING' : 'IDLE'}`);
+  isSpeaking = speaking;
+  
+  if (!speaking) {
+    // Execute all callbacks when speech ends
+    const callbacks = [...speechCallbacks];
+    speechCallbacks = [];
+    callbacks.forEach(callback => {
+      try {
+        callback();
+      } catch (error) {
+        console.error('[Speech] Callback error:', error);
+      }
+    });
+  }
+}
+
 // Enhanced speak function with Gemini TTS support
 export async function speak(text: string, options: { 
   voice?: string; 
   speed?: string; 
   forceWebTTS?: boolean;
+  priority?: 'low' | 'normal' | 'high';
 } = {}): Promise<void> {
-  const { voice = 'default', speed = 'fast', forceWebTTS = false } = options;
+  const { voice = 'zepyhr', speed = 'fast', forceWebTTS = false, priority = 'normal' } = options;
+  
+  console.log(`[Speech] Starting speech with priority ${priority}: "${text.substring(0, 50)}..."`);
+  
+  // Set speaking state at the beginning
+  setSpeechState(true);
   
   // Cancel any currently speaking utterance
   if (window.speechSynthesis) {
@@ -54,13 +95,16 @@ export async function speak(text: string, options: {
           audio.id = 'gemini-tts-audio';
           
           audio.onended = () => {
+            console.log('[Speech] Gemini TTS audio ended');
             URL.revokeObjectURL(audioUrl);
+            setSpeechState(false);
             resolve();
           };
           
           audio.onerror = (error) => {
             console.error('Audio playback error:', error);
             URL.revokeObjectURL(audioUrl);
+            setSpeechState(false);
             // Fallback to Web TTS
             speakWithWebTTS(text, speed).then(resolve).catch(reject);
           };
@@ -73,6 +117,7 @@ export async function speak(text: string, options: {
             console.error('Failed to play Gemini TTS audio:', error);
             document.body.removeChild(audio);
             URL.revokeObjectURL(audioUrl);
+            setSpeechState(false);
             // Fallback to Web TTS
             speakWithWebTTS(text, speed).then(resolve).catch(reject);
           });
@@ -82,6 +127,7 @@ export async function speak(text: string, options: {
         const data: TTSResponse = await response.json();
         if (data.fallback) {
           console.log('Gemini TTS fallback:', data.message);
+          setSpeechState(false);
           return speakWithWebTTS(text, speed);
         }
       }
@@ -95,14 +141,17 @@ export async function speak(text: string, options: {
         console.log('TTS rate limit hit, using Web TTS');
       }
       
+      setSpeechState(false);
       return speakWithWebTTS(text, speed);
     }
   } catch (error) {
     console.error('Gemini TTS request failed:', error);
+    setSpeechState(false);
     return speakWithWebTTS(text, speed);
   }
   
   // Default fallback
+  setSpeechState(false);
   return speakWithWebTTS(text, speed);
 }
 
@@ -111,9 +160,13 @@ function speakWithWebTTS(text: string, speed: string = 'fast'): Promise<void> {
   return new Promise((resolve, reject) => {
     if (!window.speechSynthesis) {
       console.error('Speech synthesis not supported');
+      setSpeechState(false);
       reject(new Error('Speech synthesis not supported'));
       return;
     }
+    
+    console.log('[Speech] Using Web TTS fallback');
+    setSpeechState(true);
     
     // Cancel any currently speaking utterance
     window.speechSynthesis.cancel();
@@ -139,9 +192,14 @@ function speakWithWebTTS(text: string, speed: string = 'fast'): Promise<void> {
     utterance.volume = 1.0;
     
     // Handle completion
-    utterance.onend = () => resolve();
+    utterance.onend = () => {
+      console.log('[Speech] Web TTS ended');
+      setSpeechState(false);
+      resolve();
+    };
     utterance.onerror = (error) => {
       console.error('Web TTS error:', error);
+      setSpeechState(false);
       reject(error);
     };
     
@@ -171,6 +229,27 @@ export async function isGeminiTTSAvailable(): Promise<boolean> {
     // Removed unused error parameter
     return false;
   }
+}
+
+// Function to cancel all ongoing speech
+export function cancelAllSpeech(): void {
+  console.log('[Speech] Cancelling all speech');
+  
+  // Cancel Web Speech API
+  if (window.speechSynthesis) {
+    window.speechSynthesis.cancel();
+  }
+  
+  // Stop Gemini TTS audio
+  const existingAudio = document.getElementById('gemini-tts-audio') as HTMLAudioElement;
+  if (existingAudio) {
+    existingAudio.pause();
+    existingAudio.remove();
+  }
+  
+  // Clear speech state and callbacks
+  setSpeechState(false);
+  clearSpeechEndCallbacks();
 }
 
 // Legacy function for backward compatibility

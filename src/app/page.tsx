@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { speak, isGeminiTTSAvailable, playRingSound } from '../utils/speech';
+import { speak, isGeminiTTSAvailable, playRingSound, getIsSpeaking, addSpeechEndCallback, cancelAllSpeech } from '../utils/speech';
 import { generateImageHash, areImagesSimilar } from '../utils/imageHash';
 
 interface Description {
@@ -56,11 +56,12 @@ export default function CameraView() {
   const tapStartTimeRef = useRef<number>(0);
 
   // Memoized speech function to avoid dependency warnings
-  const speakWithSettings = useCallback(async (text: string, options: { forceWebTTS?: boolean } = {}) => {
+  const speakWithSettings = useCallback(async (text: string, options: { forceWebTTS?: boolean; priority?: 'low' | 'normal' | 'high' } = {}) => {
     return speak(text, {
       forceWebTTS: options.forceWebTTS || !ttsSettings.useGeminiTTS,
       voice: ttsSettings.voice,
-      speed: ttsSettings.speed
+      speed: ttsSettings.speed,
+      priority: options.priority || 'normal'
     });
   }, [ttsSettings.useGeminiTTS, ttsSettings.voice, ttsSettings.speed]);
 
@@ -200,7 +201,7 @@ export default function CameraView() {
                       return;
                     } else if (data.type === 'error') {
                       setError(data.error);
-                      await speakWithSettings(data.error);
+                      await speakWithSettings(data.error, { priority: 'high' });
                       reject(new Error(data.error));
                       return;
                     }
@@ -341,6 +342,9 @@ export default function CameraView() {
   const switchMode = useCallback(async (newMode: AppMode) => {
     if (newMode === currentMode) return;
 
+    // Cancel any ongoing speech before switching modes
+    cancelAllSpeech();
+
     // Clear any existing timers
     if (focusTimerRef.current) {
       clearTimeout(focusTimerRef.current);
@@ -357,13 +361,16 @@ export default function CameraView() {
 
     setCurrentMode(newMode);
 
-    // Announce mode switch
-    if (newMode === 'narration') {
-      await speakWithSettings('Narration Mode is on now. Tap for object detection.');
-      setFocusTimer(0);
-    } else {
-      await speakWithSettings('Guidance Mode is on now. Navigation assistance every 4 seconds.');
-    }
+    // Add small delay before mode announcement to ensure clean transition
+    setTimeout(async () => {
+      // Announce mode switch with high priority
+      if (newMode === 'narration') {
+        await speakWithSettings('Narration Mode is on now. Tap for object detection.', { priority: 'high' });
+        setFocusTimer(0);
+      } else {
+        await speakWithSettings('Guidance Mode is on now. Navigation assistance every 4 seconds.', { priority: 'high' });
+      }
+    }, 200);
   }, [currentMode, speakWithSettings]);
 
   // Guidance mode management with useEffect
@@ -375,9 +382,9 @@ export default function CameraView() {
       
       // Use setInterval for more reliable updates
       const performGuidanceUpdate = async () => {
-        // Skip if currently loading or camera not ready
-        if (isLoading || !isCameraReady) {
-          console.log('Guidance update skipped - loading or camera not ready');
+        // Skip if currently loading, camera not ready, or speech is active
+        if (isLoading || !isCameraReady || getIsSpeaking()) {
+          console.log(`[Guidance] Update skipped - Loading: ${isLoading}, Camera: ${isCameraReady}, Speech: ${getIsSpeaking()}`);
           return;
         }
         
@@ -410,6 +417,18 @@ export default function CameraView() {
       // Set up regular updates
       guidanceTimerRef.current = setInterval(performGuidanceUpdate, 4000); // Every 4 seconds
       
+      // Add speech end callback to trigger guidance updates when speech completes
+      const speechEndCallback = () => {
+        if (currentMode === 'guidance') {
+          console.log('[Guidance] Speech ended, queuing guidance update in 500ms');
+          setTimeout(() => {
+            console.log('[Guidance] Executing queued guidance update');
+            performGuidanceUpdate();
+          }, 500); // Small delay to avoid immediate overlap
+        }
+      };
+      addSpeechEndCallback(speechEndCallback);
+      
       // Set up health check that runs every 10 seconds
       guidanceHealthCheckRef.current = setInterval(() => {
         if (currentMode === 'guidance') {
@@ -419,8 +438,10 @@ export default function CameraView() {
           
           // If no update in 12 seconds and retry count is reasonable, force an update
           if (timeSinceLastUpdate > 12000 && guidanceRetryCount < 3) {
-            console.log('Guidance appears stuck, forcing update');
+            console.log(`[Guidance] Health check: stuck for ${timeSinceLastUpdate}ms, forcing update`);
             performGuidanceUpdate();
+          } else {
+            console.log(`[Guidance] Health check: OK - last update ${timeSinceLastUpdate}ms ago, retry count: ${guidanceRetryCount}`);
           }
         }
       }, 10000); // Health check every 10 seconds
@@ -466,7 +487,7 @@ export default function CameraView() {
         console.error('Camera access error:', err);
         setError('Camera access denied. Please enable camera permissions.');
         await speak('Camera access denied. Please enable camera permissions and reload the page.', {
-          forceWebTTS: true
+          forceWebTTS: true,
         });
       }
     };
@@ -572,8 +593,8 @@ export default function CameraView() {
   };
 
   const handleRepeatDescription = async () => {
-    if (currentDescription) {
-      await speakWithSettings(currentDescription.text);
+    if (currentDescription && !getIsSpeaking()) {
+      await speakWithSettings(currentDescription.text, { priority: 'normal' });
     }
   };
 
@@ -727,10 +748,13 @@ export default function CameraView() {
                   e.stopPropagation();
                   handleRepeatDescription();
                 }}
-                className="text-xs bg-blue-600 px-2 py-1 rounded hover:bg-blue-700"
+                disabled={getIsSpeaking()}
+                className={`text-xs px-2 py-1 rounded ${getIsSpeaking() 
+                  ? 'bg-gray-600 cursor-not-allowed opacity-50' 
+                  : 'bg-blue-600 hover:bg-blue-700'}`}
                 aria-label="Repeat description"
               >
-                🔊 Repeat
+                🔊 {getIsSpeaking() ? 'Speaking...' : 'Repeat'}
               </button>
               <span className="text-xs text-gray-300">{formatTime(currentDescription.timestamp)}</span>
             </div>
@@ -864,11 +888,16 @@ export default function CameraView() {
                     <button
                       onClick={async (e) => {
                         e.stopPropagation();
-                        await speakWithSettings(desc.text);
+                        if (!getIsSpeaking()) {
+                          await speakWithSettings(desc.text, { priority: 'normal' });
+                        }
                       }}
-                      className="text-xs bg-blue-600 px-2 py-1 rounded hover:bg-blue-700"
+                      disabled={getIsSpeaking()}
+                      className={`text-xs px-2 py-1 rounded ${getIsSpeaking() 
+                        ? 'bg-gray-600 cursor-not-allowed opacity-50' 
+                        : 'bg-blue-600 hover:bg-blue-700'}`}
                     >
-                      🔊
+                      {getIsSpeaking() ? '⏸️' : '🔊'}
                     </button>
                     <span className="text-xs text-gray-400">{formatTime(desc.timestamp)}</span>
                   </div>
