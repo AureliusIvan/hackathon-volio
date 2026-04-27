@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import LoadingSpinner from '../components/LoadingSpinner';
-import { speak, isGeminiTTSAvailable, playRingSound, getIsSpeaking, addSpeechEndCallback, cancelAllSpeech } from '../utils/speech';
+import { speak, isElevenLabsTTSAvailable, playRingSound, getIsSpeaking, addSpeechEndCallback, cancelAllSpeech } from '../utils/speech';
 import { generateImageHash, areImagesSimilar } from '../utils/imageHash';
 
 interface Description {
@@ -23,11 +23,11 @@ export default function CameraView() {
   const [showHistory, setShowHistory] = useState<boolean>(false);
   const [showTTSControls, setShowTTSControls] = useState<boolean>(false);
   const [ttsSettings, setTtsSettings] = useState({
-    useGeminiTTS: true,
+    useElevenLabsTTS: true,
     voice: 'default',
     speed: 'fast'
   });
-  const [geminiTTSAvailable, setGeminiTTSAvailable] = useState<boolean>(false);
+  const [elevenLabsTTSAvailable, setElevenLabsTTSAvailable] = useState<boolean>(false);
   const [isWebSearching, setIsWebSearching] = useState<boolean>(false);
   const [hasWebResults, setHasWebResults] = useState<boolean>(false);
 
@@ -58,12 +58,12 @@ export default function CameraView() {
   // Memoized speech function to avoid dependency warnings
   const speakWithSettings = useCallback(async (text: string, options: { forceWebTTS?: boolean; priority?: 'low' | 'normal' | 'high' } = {}) => {
     return speak(text, {
-      forceWebTTS: options.forceWebTTS || !ttsSettings.useGeminiTTS,
+      forceWebTTS: options.forceWebTTS || !ttsSettings.useElevenLabsTTS,
       voice: ttsSettings.voice,
       speed: ttsSettings.speed,
       priority: options.priority || 'normal'
     });
-  }, [ttsSettings.useGeminiTTS, ttsSettings.voice, ttsSettings.speed]);
+  }, [ttsSettings.useElevenLabsTTS, ttsSettings.voice, ttsSettings.speed]);
 
 
   // Helper function to capture image (optimized for speed)
@@ -492,12 +492,12 @@ export default function CameraView() {
       }
     };
 
-    // Check Gemini TTS availability
+    // Check ElevenLabs TTS availability
     const checkTTSAvailability = async () => {
-      const available = await isGeminiTTSAvailable();
-      setGeminiTTSAvailable(available);
+      const available = await isElevenLabsTTSAvailable();
+      setElevenLabsTTSAvailable(available);
       if (!available) {
-        setTtsSettings(prev => ({ ...prev, useGeminiTTS: false }));
+        setTtsSettings(prev => ({ ...prev, useElevenLabsTTS: false }));
       }
     };
 
@@ -732,8 +732,8 @@ export default function CameraView() {
           <div className="flex justify-between items-start p-3 pb-2 border-b border-gray-600">
             <h3 className="text-sm font-semibold text-white">
               {currentDescription.mode === 'narration' ? '📖' : '🧭'} {currentDescription.mode.toUpperCase()}
-              {ttsSettings.useGeminiTTS && geminiTTSAvailable && (
-                <span className="text-xs bg-green-600 px-2 py-1 rounded ml-2">Gemini TTS</span>
+              {ttsSettings.useElevenLabsTTS && elevenLabsTTSAvailable && (
+                <span className="text-xs bg-green-600 px-2 py-1 rounded ml-2">ElevenLabs TTS</span>
               )}
               {isWebSearching && (
                 <span className="text-xs bg-blue-600 px-2 py-1 rounded ml-2 animate-pulse">🔍 Searching Web...</span>
@@ -791,12 +791,12 @@ export default function CameraView() {
               <label className="flex items-center text-sm">
                 <input
                   type="checkbox"
-                  checked={ttsSettings.useGeminiTTS && geminiTTSAvailable}
-                  disabled={!geminiTTSAvailable}
-                  onChange={(e) => setTtsSettings(prev => ({ ...prev, useGeminiTTS: e.target.checked }))}
+                  checked={ttsSettings.useElevenLabsTTS && elevenLabsTTSAvailable}
+                  disabled={!elevenLabsTTSAvailable}
+                  onChange={(e) => setTtsSettings(prev => ({ ...prev, useElevenLabsTTS: e.target.checked }))}
                   className="mr-2"
                 />
-                Use Gemini TTS {!geminiTTSAvailable && '(Unavailable)'}
+                Use ElevenLabs TTS {!elevenLabsTTSAvailable && '(Unavailable)'}
               </label>
             </div>
 
@@ -813,7 +813,7 @@ export default function CameraView() {
               </select>
             </div>
 
-            {ttsSettings.useGeminiTTS && (
+            {ttsSettings.useElevenLabsTTS && (
               <div>
                 <label className="block text-sm mb-1">Voice Style:</label>
                 <select

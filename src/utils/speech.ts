@@ -41,7 +41,7 @@ function setSpeechState(speaking: boolean): void {
   }
 }
 
-// Enhanced speak function with Gemini TTS support
+// Enhanced speak function with ElevenLabs TTS support
 export async function speak(text: string, options: { 
   voice?: string; 
   speed?: string; 
@@ -61,19 +61,19 @@ export async function speak(text: string, options: {
   }
   
   // Stop any currently playing audio
-  const existingAudio = document.getElementById('gemini-tts-audio') as HTMLAudioElement;
+  const existingAudio = document.getElementById('elevenlabs-tts-audio') as HTMLAudioElement;
   if (existingAudio) {
     existingAudio.pause();
     existingAudio.remove();
   }
   
-  // Skip Gemini TTS if forced to use Web TTS or if text is too short
+  // Skip ElevenLabs TTS if forced to use Web TTS or if text is too short
   if (forceWebTTS || text.length < 10) {
     return speakWithWebTTS(text, speed);
   }
   
   try {
-    // Try Gemini TTS first
+    // Try ElevenLabs TTS first
     const response = await fetch('/api/tts', {
       method: 'POST',
       headers: {
@@ -92,10 +92,10 @@ export async function speak(text: string, options: {
         
         return new Promise((resolve, reject) => {
           const audio = new Audio(audioUrl);
-          audio.id = 'gemini-tts-audio';
+          audio.id = 'elevenlabs-tts-audio';
           
           audio.onended = () => {
-            console.log('[Speech] Gemini TTS audio ended');
+            console.log('[Speech] ElevenLabs TTS audio ended');
             URL.revokeObjectURL(audioUrl);
             setSpeechState(false);
             resolve();
@@ -114,7 +114,7 @@ export async function speak(text: string, options: {
           document.body.appendChild(audio);
           
           audio.play().catch(error => {
-            console.error('Failed to play Gemini TTS audio:', error);
+            console.error('Failed to play ElevenLabs TTS audio:', error);
             document.body.removeChild(audio);
             URL.revokeObjectURL(audioUrl);
             setSpeechState(false);
@@ -126,7 +126,7 @@ export async function speak(text: string, options: {
         // If we got a JSON response (fallback indicated)
         const data: TTSResponse = await response.json();
         if (data.fallback) {
-          console.log('Gemini TTS fallback:', data.message);
+          console.log('ElevenLabs TTS fallback:', data.message);
           setSpeechState(false);
           return speakWithWebTTS(text, speed);
         }
@@ -134,7 +134,7 @@ export async function speak(text: string, options: {
     } else {
       // Handle error responses
       const errorData: TTSResponse = await response.json();
-      console.warn('Gemini TTS error:', errorData.error);
+      console.warn('ElevenLabs TTS error:', errorData.error);
       
       // For rate limits, we might want to show a message
       if (errorData.errorType === 'RATE_LIMIT_EXCEEDED') {
@@ -145,7 +145,7 @@ export async function speak(text: string, options: {
       return speakWithWebTTS(text, speed);
     }
   } catch (error) {
-    console.error('Gemini TTS request failed:', error);
+    console.error('ElevenLabs TTS request failed:', error);
     setSpeechState(false);
     return speakWithWebTTS(text, speed);
   }
@@ -208,8 +208,8 @@ function speakWithWebTTS(text: string, speed: string = 'fast'): Promise<void> {
   });
 }
 
-// Utility function to check if Gemini TTS is available
-export async function isGeminiTTSAvailable(): Promise<boolean> {
+// Utility function to check if ElevenLabs TTS is available
+export async function isElevenLabsTTSAvailable(): Promise<boolean> {
   try {
     const response = await fetch('/api/tts', {
       method: 'POST',
@@ -247,8 +247,8 @@ export function cancelAllSpeech(): void {
     window.speechSynthesis.cancel();
   }
   
-  // Stop Gemini TTS audio
-  const existingAudio = document.getElementById('gemini-tts-audio') as HTMLAudioElement;
+  // Stop ElevenLabs TTS audio
+  const existingAudio = document.getElementById('elevenlabs-tts-audio') as HTMLAudioElement;
   if (existingAudio) {
     existingAudio.pause();
     existingAudio.remove();
